@@ -141,7 +141,14 @@ fi
 
 # -------------------------------------------------------------------- nginx
 log "Nginx (server blocks propios, no se tocan los de AgroSoft)"
-sudo cp "$BACKEND_DIR/nginx/agrocarnes.conf" /etc/nginx/sites-available/agrocarnes.conf
+# Solo se instala la configuración base la primera vez: después Certbot la
+# modifica (bloques 443) y no debemos pisarla en cada despliegue.
+if [ ! -f /etc/nginx/sites-available/agrocarnes.conf ] || ! grep -q "listen 443" /etc/nginx/sites-available/agrocarnes.conf; then
+  sudo cp "$BACKEND_DIR/nginx/agrocarnes.conf" /etc/nginx/sites-available/agrocarnes.conf
+  echo "Configuración base de nginx instalada."
+else
+  echo "Configuración de nginx con HTTPS ya existe, se conserva."
+fi
 sudo ln -sf /etc/nginx/sites-available/agrocarnes.conf /etc/nginx/sites-enabled/agrocarnes.conf
 sudo nginx -t
 sudo systemctl reload nginx
@@ -155,6 +162,9 @@ if [ -n "$MI_IP" ] && [ "$DNS_APP" = "$MI_IP" ] && [ "$DNS_API" = "$MI_IP" ]; th
     log "HTTPS con Certbot"
     sudo certbot --nginx -n --agree-tos --redirect -m "${ADMIN_EMAIL:-admin@agrofranpabel.com}" \
       -d "$APP_DOMAIN" -d "$API_DOMAIN" || warn "Certbot falló; la app queda en HTTP por ahora."
+  elif ! grep -q "listen 443" /etc/nginx/sites-available/agrocarnes.conf; then
+    log "Certificado existe pero nginx no lo usa: reinstalando"
+    sudo certbot install --cert-name "$APP_DOMAIN" --nginx --redirect -n || warn "No se pudo reinstalar el certificado en nginx."
   else
     echo "Certificado HTTPS ya existe."
   fi
