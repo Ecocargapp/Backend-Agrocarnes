@@ -18,6 +18,12 @@ AgroSoft salvo la máquina física.
 | API | `api.agrofranpabel.com` | `api-agrocarnes.agrofranpabel.com` |
 | App | `app.agrofranpabel.com` | `agrocarnes.agrofranpabel.com` |
 
+## Documentación
+
+La documentación técnica y funcional completa (para operación y auditoría)
+está en [`docs/`](docs/README.md); el historial de versiones en
+[`CHANGELOG.md`](CHANGELOG.md). PDF: `bash docs/generar-pdf.sh`.
+
 ## Qué hay en este repo
 
 - `src/server.js` — Express (módulos ES), JWT, CORS. Rutas en `src/routes/`.

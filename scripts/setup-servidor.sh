@@ -127,6 +127,14 @@ pm2 save >/dev/null
 sleep 2
 curl -fsS "http://127.0.0.1:$API_PORT/health" && echo "  ← API respondiendo"
 
+# ---------------------------------------------------------------- respaldos
+log "Respaldo diario de la base de datos (cron 02:30, 30 días en /var/backups/agrocarnes)"
+chmod +x "$BACKEND_DIR/scripts/respaldo-bd.sh"
+CRON_LINE="30 2 * * * /bin/bash $BACKEND_DIR/scripts/respaldo-bd.sh >> /var/log/agrocarnes-respaldo.log 2>&1"
+( crontab -l 2>/dev/null | grep -v 'respaldo-bd.sh' ; echo "$CRON_LINE" ) | crontab -
+sudo touch /var/log/agrocarnes-respaldo.log && sudo chown "$USER" /var/log/agrocarnes-respaldo.log
+bash "$BACKEND_DIR/scripts/respaldo-bd.sh" || warn "El primer respaldo falló; revisa /var/log/agrocarnes-respaldo.log"
+
 # ----------------------------------------------------------------- frontend
 log "Frontend → $FRONTEND_DIR"
 if [ ! -d "$FRONTEND_DIR/.git" ]; then
