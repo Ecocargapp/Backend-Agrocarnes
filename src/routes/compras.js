@@ -1,0 +1,64 @@
+import { Router } from 'express';
+import { pool } from '../db/pool.js';
+import { registrarMovimiento } from '../db/inventario.js';
+
+export const router = Router();
+
+// Registra una compra a un proveedor externo (ej. Agro Franpabel -> Agrocarnes
+// o Agro Franpabel -> D'Monsa): entra el insumo al costo facturado.
+// body: { empresa_id, proveedor_id, numero_factura_proveedor, fecha, items: [{producto_id, bodega_id, cantidad, costo_unitario}] }
+router.post('/', async (req, res) => {
+  const { empresa_id, proveedor_id, numero_factura_proveedor, fecha, items } = req.body;
+  if (!empresa_id || !proveedor_id || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Faltan empresa_id, proveedor_id o items' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+
+    const total = items.reduce((acc, it) => acc + Number(it.cantidad) * Number(it.costo_unitario), 0);
+    const { rows: compraRows } = await client.query(
+      `insert into compra (empresa_id, proveedor_id, numero_factura_proveedor, fecha, total)
+       values ($1, $2, $3, coalesce($4, current_date), $5) returning id`,
+      [empresa_id, proveedor_id, numero_factura_proveedor || null, fecha || null, total]
+    );
+    const compraId = compraRows[0].id;
+
+    for (const item of items) {
+      await client.query(
+        `insert into compra_item (compra_id, producto_id, bodega_id, cantidad, costo_unitario)
+         values ($1, $2, $3, $4, $5)`,
+        [compraId, item.producto_id, item.bodega_id, item.cantidad, item.costo_unitario]
+      );
+      await registrarMovimiento(client, {
+        tipo: 'compra',
+        producto_id: item.producto_id,
+        bodega_id: item.bodega_id,
+        cantidad: item.cantidad,
+        costo_unitario: item.costo_unitario,
+        referencia_tipo: 'compra',
+        referencia_id: compraId,
+        creado_por: req.usuario?.sub,
+      });
+    }
+
+    await client.query('commit');
+    res.status(201).json({ id: compraId, total });
+  } catch (err) {
+    await client.query('rollback');
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+router.get('/', async (req, res) => {
+  const { empresa_id } = req.query;
+  const params = [];
+  let sql = 'select * from compra';
+  if (empresa_id) { params.push(empresa_id); sql += ' where empresa_id = $1'; }
+  sql += ' order by fecha desc, creado_en desc limit 200';
+  const { rows } = await pool.query(sql, params);
+  res.json(rows);
+});

@@ -1,0 +1,59 @@
+import { Router } from 'express';
+import { pool } from '../db/pool.js';
+import { registrarMovimiento } from '../db/inventario.js';
+
+export const router = Router();
+
+// Mueve producto de una bodega a otra (ej. Agrocarnes -> Restaurante, o
+// Agrocarnes -> D'Monsa la carne para embutidos). Por defecto es un traslado
+// interno sin factura, al costo. Si tu contador pide facturarlo entre
+// compañías, marca es_venta_intercompania y pasa factura_venta_id (esa
+// factura se crea aparte, en /ventas, con este mismo producto).
+router.post('/', async (req, res) => {
+  const {
+    producto_id, bodega_origen_id, bodega_destino_id, cantidad,
+    es_venta_intercompania = false, factura_venta_id = null,
+  } = req.body;
+  if (!producto_id || !bodega_origen_id || !bodega_destino_id || !cantidad) {
+    return res.status(400).json({ error: 'Faltan producto_id, bodega_origen_id, bodega_destino_id o cantidad' });
+  }
+  if (bodega_origen_id === bodega_destino_id) {
+    return res.status(400).json({ error: 'La bodega de origen y destino no pueden ser la misma' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+
+    const { rows: existRows } = await client.query(
+      'select costo_promedio from existencia where bodega_id = $1 and producto_id = $2',
+      [bodega_origen_id, producto_id]
+    );
+    if (existRows.length === 0) throw new Error('El producto no tiene existencia en la bodega de origen');
+    const costoUnitario = existRows[0].costo_promedio;
+
+    const { rows: traslabRows } = await client.query(
+      `insert into traslado (producto_id, bodega_origen_id, bodega_destino_id, cantidad, costo_unitario, es_venta_intercompania, factura_venta_id)
+       values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+      [producto_id, bodega_origen_id, bodega_destino_id, cantidad, costoUnitario, es_venta_intercompania, factura_venta_id]
+    );
+    const trasladoId = traslabRows[0].id;
+
+    await registrarMovimiento(client, {
+      tipo: 'traslado_salida', producto_id, bodega_id: bodega_origen_id, cantidad, costo_unitario: costoUnitario,
+      referencia_tipo: 'traslado', referencia_id: trasladoId, creado_por: req.usuario?.sub,
+    });
+    await registrarMovimiento(client, {
+      tipo: 'traslado_entrada', producto_id, bodega_id: bodega_destino_id, cantidad, costo_unitario: costoUnitario,
+      referencia_tipo: 'traslado', referencia_id: trasladoId, creado_por: req.usuario?.sub,
+    });
+
+    await client.query('commit');
+    res.status(201).json({ id: trasladoId, costo_unitario: costoUnitario });
+  } catch (err) {
+    await client.query('rollback');
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
