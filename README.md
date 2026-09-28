@@ -102,18 +102,30 @@ cd /var/www/agrocarnes-backend && git pull && npm install --omit=dev && npm run 
 cd /var/www/app-agrocarnes && git pull
 ```
 
-## Facturación electrónica DIAN
+## Facturación electrónica DIAN (vía Arco ERP)
 
-`src/dian/cliente.js` es el único punto de integración: arma el JSON de la
-factura, hace el POST al proveedor tecnológico con las credenciales de la
-empresa emisora, y guarda `cufe`, `xml_url`, `pdf_url` y `estado_dian` en
-`factura_venta`. Como cada empresa (Agrocarnes, Restaurante) probablemente
-tiene NIT propio, cada una necesita su propia habilitación y certificado ante
-la DIAN, aunque compartan este mismo sistema.
+La facturación electrónica se hace a través de **Arco ERP** (`src/dian/`):
+Arco numera la factura con su resolución, la firma y la transmite a la DIAN.
+
+- `src/dian/arco.js` — cliente HTTP (login → token `OAuth`, renovación automática).
+- `src/dian/cliente.js` — `enviarFacturaADian` (Factura/Insert), `sincronizarEstado`
+  (Factura/Get → CUFE), `probarConexion` y el job que reintenta cada 2 min.
+- Configuración por empresa en `empresa.arco_config` (pantalla **Configuración**,
+  solo admin): host, company, user, password, DocumentoId, SucursalId, BodegaId,
+  ClienteId de consumidor final. Cada NIT necesita su propia cuenta de Arco.
+- Cada producto vendido necesita `arco_producto_id` (el ProductoId con el que
+  existe en Arco) y `impuesto_pct` si el precio incluye IVA/impoconsumo.
+- Los clientes con documento se crean en Arco (Tercero/Insert + Cliente/Insert)
+  la primera vez que se les factura; el id queda en `tercero.arco_cliente_id`.
+- Estados en `factura_venta.estado_dian`: pendiente · sin_configurar · enviada ·
+  aceptada (CUFE) · error (se reintenta) · rechazada. Mensaje en `dian_mensaje`.
+- Variables: `DIAN_JOB=off` desactiva el job (útil en pruebas locales).
+
+Documentación de Arco: https://documenter.getpostman.com/view/289978/UzJFweL6
 
 ## Pendiente de decidir
 
 - Si el traslado Agrocarnes → Restaurante / D'Monsa queda como traslado
   interno sin factura o como venta intercompañía — a confirmar con el contador.
-- Proveedor tecnológico de facturación electrónica.
+- Cuentas de Arco de Agrocarnes y del Restaurante (host, usuario, DocumentoId).
 - Dominio definitivo (hoy: subdominios de agrofranpabel.com).

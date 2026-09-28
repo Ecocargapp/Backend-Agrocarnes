@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 
 import { requireAuth } from './middleware/auth.js';
+import { iniciarJobDian } from './dian/cliente.js';
 import { router as authRouter } from './routes/auth.js';
 import { router as empresasRouter } from './routes/empresas.js';
 import { router as productosRouter } from './routes/productos.js';
@@ -46,4 +47,5 @@ app.use((err, _req, res, _next) => {
 const port = Number(process.env.PORT || 4001);
 app.listen(port, () => {
   console.log(`agrocarnes-api escuchando en el puerto ${port}`);
+  if (process.env.DIAN_JOB !== 'off') iniciarJobDian();
 });

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { registrarMovimiento } from '../db/inventario.js';
-import { enviarFacturaADian } from '../dian/cliente.js';
+import { enviarFacturaADian, sincronizarEstado } from '../dian/cliente.js';
 
 export const router = Router();
 
@@ -78,7 +78,7 @@ router.get('/', async (req, res) => {
   let where = '';
   if (empresa_id) { params.push(empresa_id); where = 'where f.empresa_id = $1'; }
   const { rows } = await pool.query(
-    `select f.id, f.consecutivo, f.fecha, f.total, f.estado_dian, f.cufe,
+    `select f.id, f.consecutivo, f.fecha, f.total, f.estado_dian, f.cufe, f.dian_mensaje, f.arco_factura_id,
             e.nombre as empresa, t.nombre as cliente,
             (select count(*)::int from factura_venta_item i where i.factura_venta_id = f.id) as items
      from factura_venta f
@@ -106,4 +106,22 @@ router.get('/:id', async (req, res) => {
     [req.params.id]
   );
   res.json({ ...rows[0], items });
+});
+
+// Reintenta el envío a la DIAN (o refresca el estado si ya está en Arco).
+router.post('/:id/dian', async (req, res) => {
+  try {
+    const r = await enviarFacturaADian(req.params.id);
+    res.json(r);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/:id/dian/estado', async (req, res) => {
+  try {
+    res.json(await sincronizarEstado(req.params.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
