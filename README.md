@@ -38,8 +38,9 @@ está en [`docs/`](docs/README.md); el historial de versiones en
   - `traslados.js` — Agrocarnes → Restaurante / D'Monsa, al costo, sin factura. Columna `es_venta_intercompania` lista por si el contador pide facturarlo.
   - `produccion.js` — corre una receta (BOM): consume insumos, entra el terminado con su costo calculado.
   - `ventas.js` — venta al cliente final; descuenta inventario y dispara el envío a la DIAN en segundo plano.
-- `src/dian/cliente.js` — el único archivo que se llena cuando se elija el
-  proveedor tecnológico de facturación electrónica. Hoy es un placeholder.
+  - `cartera.js` — cuentas por cobrar (recibos de caja) y por pagar (pagos a proveedores), con antigüedad de saldos.
+  - `notas-credito.js` — notas crédito y anulación de facturas de venta.
+- `src/dian/cliente.js`, `src/dian/notas.js` — integración con Arco: facturas y notas crédito.
 - `nginx/agrocarnes.conf` — server blocks separados de los de AgroSoft.
 - `ecosystem.config.cjs` — proceso pm2 `agrocarnes-api`.
 
@@ -129,9 +130,24 @@ Arco numera la factura con su resolución, la firma y la transmite a la DIAN.
 
 Documentación de Arco: https://documenter.getpostman.com/view/289978/UzJFweL6
 
+## Cartera y notas crédito
+
+- `src/routes/cartera.js` — cuentas por cobrar y por pagar propias (no
+  dependen de Arco ni del contador): recibos de caja, pagos a proveedores,
+  antigüedad de saldos y resumen. El saldo vive en `factura_venta.saldo` /
+  `compra.saldo`.
+- `src/routes/notas-credito.js` + `src/dian/notas.js` — notas crédito
+  (devolución, rebaja, ajuste de precio, descuentos) y anulación de facturas
+  ya emitidas electrónicamente. Los nombres exactos de los campos de
+  `NotaCredito/Insert`/`NotaCredito/Get` de Arco no están confirmados contra
+  su documentación pública (ver docs/05); antes de la primera nota crédito
+  real hay que validarlos con Arco y probar contra su simulador.
+
 ## Pendiente de decidir
 
 - Si el traslado Agrocarnes → Restaurante / D'Monsa queda como traslado
   interno sin factura o como venta intercompañía — a confirmar con el contador.
 - Cuentas de Arco de Agrocarnes y del Restaurante (host, usuario, DocumentoId).
 - Dominio definitivo (hoy: subdominios de agrofranpabel.com).
+- Confirmar contra Arco los campos exactos de NotaCredito/Insert y
+  NotaCredito/Get antes de emitir la primera nota crédito real.

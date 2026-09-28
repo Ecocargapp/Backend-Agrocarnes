@@ -4,6 +4,7 @@ import cors from 'cors';
 
 import { requireAuth } from './middleware/auth.js';
 import { iniciarJobDian } from './dian/cliente.js';
+import { iniciarJobNotasCredito } from './dian/notas.js';
 import { router as authRouter } from './routes/auth.js';
 import { router as empresasRouter } from './routes/empresas.js';
 import { router as productosRouter } from './routes/productos.js';
@@ -15,6 +16,8 @@ import { router as ventasRouter } from './routes/ventas.js';
 import { router as bodegasRouter } from './routes/bodegas.js';
 import { router as tercerosRouter } from './routes/terceros.js';
 import { router as recetasRouter } from './routes/recetas.js';
+import { router as carteraRouter } from './routes/cartera.js';
+import { router as notasCreditoRouter } from './routes/notas-credito.js';
 
 const app = express();
 const corsOrigin = process.env.CORS_ORIGIN;
@@ -38,6 +41,8 @@ app.use('/ventas', requireAuth, ventasRouter);
 app.use('/bodegas', requireAuth, bodegasRouter);
 app.use('/terceros', requireAuth, tercerosRouter);
 app.use('/recetas', requireAuth, recetasRouter);
+app.use('/cartera', requireAuth, carteraRouter);
+app.use('/notas-credito', requireAuth, notasCreditoRouter);
 
 app.use((err, _req, res, _next) => {
   console.error(err);
@@ -47,5 +52,8 @@ app.use((err, _req, res, _next) => {
 const port = Number(process.env.PORT || 4001);
 app.listen(port, () => {
   console.log(`agrocarnes-api escuchando en el puerto ${port}`);
-  if (process.env.DIAN_JOB !== 'off') iniciarJobDian();
+  if (process.env.DIAN_JOB !== 'off') {
+    iniciarJobDian();
+    iniciarJobNotasCredito();
+  }
 });

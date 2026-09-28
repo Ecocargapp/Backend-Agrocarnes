@@ -10,6 +10,82 @@ entrega del día).
 
 ---
 
+## 2026.09.28.7 — Pantallas de cartera y notas crédito; informes a Excel
+
+- Frontend: pantalla **Cartera** (por cobrar / por pagar) con resumen,
+  antigüedad de saldos por cliente/proveedor, detalle de documentos y
+  registro de recibos de caja y pagos a proveedores (aplicables a una o
+  varias facturas/compras a la vez).
+- Frontend: pantalla **Notas crédito**, accesible también desde el detalle
+  de una factura en Ventas ("Nota crédito / Anular"): selecciona la
+  factura, marca los productos y cantidades a devolver con su razón, o
+  anula la factura completa con un solo botón.
+- Frontend: Ventas y Compras ahora piden la forma de pago (contado/crédito)
+  al registrar el documento, con medio de pago o plazo según corresponda;
+  antes siempre se enviaban como "contado" sin que la pantalla lo pidiera.
+- Frontend: **informe de venta diaria** (Ventas) y **detalle de cartera**
+  (Cartera) descargables a Excel (.xlsx), con fecha de factura, fecha de
+  vencimiento, forma y medio de pago. Se generan en el navegador con la
+  librería `xlsx` (SheetJS) empaquetada localmente en `js/vendor/` — no se
+  carga desde un CDN externo, para no depender de la red de cada cliente.
+- Backend: `GET /ventas/reporte-diario` (ventas del día con forma y medio de
+  pago) y `GET /cartera/clientes/documentos` / `GET /cartera/proveedores/documentos`
+  (todos los documentos con saldo, con fecha de factura y vencimiento) para
+  alimentar esos informes. `GET /ventas/:id` ahora también devuelve
+  `producto_id` en cada ítem (lo necesita la pantalla de notas crédito).
+- Corrección: un `[hidden]` en un `<label>` no ocultaba nada porque la regla
+  propia `label { display: flex }` le ganaba a `[hidden]` del navegador (el
+  origen "author" siempre gana sobre el "user-agent", sin importar
+  especificidad) — afectaba a los campos que se muestran u ocultan según la
+  forma de pago elegida. Se agregó `[hidden] { display: none !important; }`
+  una sola vez en `styles.css`.
+- Pruebas: flujo de punta a punta con un navegador real (Playwright, sin
+  interfaz) contra la API local — venta de contado y a crédito, alternar
+  forma de pago, descarga y verificación del contenido de los dos informes
+  Excel, recibo y pago parciales con la validación de saldo, anulación de
+  factura por nota crédito, y las notas crédito quedando en `no_aplica`
+  cuando la factura no es electrónica.
+
+## 2026.09.28.6 — Cartera propia y notas crédito
+
+- Backend: cartera de cuentas por cobrar y por pagar propia del sistema (no
+  depende de Arco ni del reporte del contador): recibos de caja (cobro de
+  una o varias facturas de un cliente) y pagos a proveedores (una o varias
+  compras), con antigüedad de saldos (por vencer, 1-30, 31-60, 61-90, más de
+  90 días) y resumen por empresa (`src/routes/cartera.js`).
+- Backend: notas crédito sobre facturas de venta — devolución parcial,
+  anulación (reingresa todo el inventario y anula la factura), rebaja o
+  descuento, ajuste de precio, descuento pronto pago y por volumen; valida
+  que no se devuelva más de lo facturado descontando notas anteriores
+  (`src/routes/notas-credito.js`). Envío a Arco en segundo plano cuando la
+  factura original fue emitida electrónicamente (`src/dian/notas.js`, mismo
+  patrón de reintentos que las facturas); si no lo fue, el efecto es solo
+  local (`estado_dian = 'no_aplica'`).
+- Ventas y compras ahora admiten `forma_pago` contado/crédito con plazo o
+  fecha de vencimiento; de contado se cobra/paga automáticamente al
+  registrar el documento.
+- Corrección: el envío de `anulacion: true` sin `razon` explícita en
+  `POST /notas-credito` fallaba la validación antes de inferir `razon = 2`
+  (se movió la inferencia antes de validar).
+- Migración `004_cartera_y_notas_credito.sql`: `factura_venta.forma_pago`,
+  `fecha_vencimiento`, `saldo`, `estado`, `anulada_en`, `anulada_por`,
+  `motivo_anulacion`, `creado_por`; `compra.forma_pago`, `fecha_vencimiento`,
+  `saldo`, `creado_por`; tablas `recibo_caja`, `recibo_caja_aplicacion`,
+  `pago_proveedor`, `pago_proveedor_aplicacion`, `nota_credito`,
+  `nota_credito_item`; `empresa.ultimo_recibo`, `ultimo_pago`,
+  `ultimo_nota_credito`; nuevos tipos de movimiento de inventario
+  `devolucion_venta` y `anulacion_venta`.
+- Pruebas: flujo completo probado de punta a punta contra una base de datos
+  local (compra a crédito → pago parcial → saldo correcto; venta a crédito →
+  recibo parcial → saldo correcto; nota crédito con devolución parcial →
+  reingreso de inventario al costo original y reducción del saldo; nota
+  crédito de anulación total → saldo en cero, factura anulada, inventario
+  reingresado; rechazo de recibos/pagos que superan el saldo disponible).
+  Pendiente: validar los campos de NotaCredito/Insert contra Arco antes de
+  la primera nota crédito real (ver README y docs/05).
+- docs/03, docs/04 y docs/05 actualizados con el modelo de datos, el proceso
+  de cartera y notas crédito, y el detalle de la integración con Arco.
+
 ## 2026.09.28.5 — Documentación para auditoría y respaldos
 
 - Se crea la carpeta `docs/` con la documentación técnica y funcional
@@ -105,7 +181,7 @@ entrega del día).
 | Tema | Estado |
 | --- | --- |
 | Tratamiento tributario de los traslados Agrocarnes → Restaurante / D'Monsa (interno vs. venta intercompañía) | Por confirmar con el contador; el sistema soporta ambos |
-| Notas crédito y anulación de facturas electrónicas | Por implementar (Arco: `NotaCredito/Insert`, `Factura/Anula`) |
+| Campos exactos de `NotaCredito/Insert` y `NotaCredito/Get` de Arco | Implementado con la misma convención que `Factura/Insert`; por confirmar con Arco y probar contra el simulador antes de la primera nota crédito real |
 | Bitácora de inicios de sesión y consultas | Por implementar |
 | Administración de usuarios desde la aplicación | Por implementar |
 | Copia de respaldos fuera del servidor (S3) | Por implementar |

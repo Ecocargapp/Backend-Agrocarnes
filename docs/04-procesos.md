@@ -88,6 +88,54 @@ D'Monsa (carne para embutidos).
 4. El estado de cada factura frente a la DIAN es visible en la lista de
    ventas; el detalle muestra CUFE, mensaje y permite reintentar.
 
+## 4.4bis Cartera (cuentas por cobrar y por pagar)
+
+Toda venta y toda compra nace con `forma_pago` contado o crédito. De contado
+se cobra/paga de inmediato (recibo o pago automático por el mismo valor); a
+crédito queda con `saldo` pendiente y una `fecha_vencimiento` (plazo en días
+o fecha explícita).
+
+1. Pantalla **Cartera → Por cobrar**: un resumen por cliente con antigüedad
+   de saldos (por vencer, 1-30, 31-60, 61-90, más de 90 días) y, al entrar a
+   un cliente, el detalle de sus facturas con saldo. El botón **Recibo de
+   caja** registra un cobro (efectivo, transferencia, tarjeta u otro) que se
+   puede aplicar a una o varias facturas del mismo cliente en un solo
+   movimiento; no se permite aplicar más del saldo de cada factura.
+2. Pantalla **Cartera → Por pagar**: lo mismo para proveedores. El botón
+   **Pago a proveedor** aplica a una o varias compras.
+3. El saldo de cada factura/compra vive únicamente en `factura_venta.saldo` /
+   `compra.saldo` y solo lo modifican estos dos flujos (y las notas crédito,
+   4.4ter). Nunca se edita a mano.
+4. Pantalla **Cartera → Resumen**: total por cobrar y por pagar, y cuánto de
+   eso está vencido, por empresa.
+
+## 4.4ter Notas crédito y anulación de facturas
+
+Corrige una factura de venta ya registrada sin borrar ni editar el
+documento original (ver 4.6). Pantalla **Ventas → detalle de factura → Nota
+crédito**, con una razón (código DIAN):
+
+| Razón | Efecto en inventario | Efecto en cartera |
+| --- | --- | --- |
+| 1 · Devolución parcial | Reingresa lo devuelto (opcional) | Reduce el saldo por cobrar en el valor de la nota |
+| 2 · Anulación de factura | Reingresa todo lo vendido | Salda la factura y la deja `anulada` |
+| 3 · Rebaja o descuento | No mueve inventario | Reduce el saldo por cobrar |
+| 4 · Ajuste de precio | No mueve inventario | Reduce el saldo por cobrar |
+| 5 · Descuento pronto pago | No mueve inventario | Reduce el saldo por cobrar |
+| 6 · Descuento por volumen | No mueve inventario | Reduce el saldo por cobrar |
+
+No se puede devolver o descontar más de lo facturado (se valida contra las
+notas ya emitidas sobre la misma factura). Si la factura ya tenía cobros
+aplicados y se anula, el sistema informa el saldo a favor del cliente en
+lugar de aplicarlo automáticamente. Cuando la factura fue emitida
+electrónicamente, la nota crédito se envía a Arco en segundo plano (doc 05);
+si no lo fue, el efecto es solo local.
+
+Anular una factura **antes** de emitirla electrónicamente (`arco_factura_id`
+nulo) usa en cambio `POST /ventas/:id/anular`, que revierte directamente sin
+generar una nota crédito formal — solo aplica si no tiene cobros aplicados a
+crédito.
+
 ## 4.5 Consulta de inventario y kardex
 
 Pantalla **Inventario**: existencias por bodega (cantidad, costo promedio,
@@ -99,7 +147,9 @@ tipo, cantidad (+/−) y costo. El valor del inventario mostrado es
 
 No se editan ni eliminan documentos ya registrados. Una compra mal digitada
 se corrige con una compra de ajuste; un traslado en sentido contrario
-devuelve el producto; una venta se corregirá con nota crédito cuando ese
-módulo esté disponible. Mientras tanto, cualquier ajuste manual que fuera
-indispensable se hace en la base de datos por el administrador y se
-documenta en el CHANGELOG con fecha, motivo y registros afectados.
+devuelve el producto; una venta se corrige con una nota crédito (4.4ter) o,
+si aún no ha sido emitida electrónicamente y no tiene cobros a crédito
+aplicados, con `POST /ventas/:id/anular`. Cualquier ajuste manual que fuera
+indispensable fuera de estos flujos se hace en la base de datos por el
+administrador y se documenta en el CHANGELOG con fecha, motivo y registros
+afectados.

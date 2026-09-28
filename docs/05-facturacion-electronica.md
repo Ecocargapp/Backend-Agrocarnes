@@ -99,8 +99,34 @@ Documentación oficial: https://documenter.getpostman.com/view/289978/UzJFweL6
 | GET Cliente/List, POST Tercero/Insert, POST Cliente/Insert | Buscar o crear el adquiriente |
 | GET Sucursal/List, GET Bodega/List | Prueba de conexión |
 
-Previstos (no implementados aún): POST NotaCredito/Insert (devoluciones y
-anulaciones), POST Factura/Anula.
+| POST NotaCredito/Insert | Crear la nota crédito (devolución, rebaja, ajuste o anulación) |
+| GET NotaCredito/Get/{id} | Consultar CUFE y estado FE de la nota crédito |
+
+**Nota sobre NotaCredito/Insert y NotaCredito/Get:** a diferencia de
+Factura/Insert (ya probado contra el simulador de Arco), los nombres exactos
+de los campos de estos dos endpoints no están confirmados contra la
+documentación pública de Arco (no la expone con ese nivel de detalle);
+`src/dian/notas.js` los implementó siguiendo la misma convención de nombres
+que usa Factura/Insert del mismo proveedor. **Antes de la primera nota
+crédito real hay que confirmarlos con soporte de Arco (o su Postman privado)
+y probarlos contra el simulador**, igual que se hizo con la factura.
+
+## Notas crédito y anulación de facturas
+
+Cubre devoluciones, rebajas/descuentos, ajustes de precio y anulación de una
+factura ya emitida electrónicamente (`POST /notas-credito`, ver doc 04 y 03).
+
+- Si la factura original **no** fue emitida electrónicamente (`arco_factura_id`
+  nulo, por ejemplo porque la empresa no factura electrónicamente o el envío
+  nunca se hizo), la nota crédito queda con `estado_dian = 'no_aplica'` y
+  nunca se envía a Arco: el efecto es puramente local (inventario y cartera).
+- Si sí fue emitida, la nota se crea local en la misma transacción y, ya
+  confirmada, se envía a Arco en segundo plano (`enviarNotaCreditoADian`),
+  con el mismo patrón de reintentos y estados que la factura
+  (`pendiente → enviada → aceptada/rechazada`, job cada 2 min).
+- Razón 2 (anulación) siempre reingresa el inventario completo de la factura
+  y la deja en `estado = 'anulada'`; las demás razones son parciales y no
+  cambian el estado de la factura, solo su saldo por cobrar.
 
 ## Cruce para auditoría
 
