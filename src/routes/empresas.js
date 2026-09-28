@@ -3,16 +3,28 @@ import { pool } from '../db/pool.js';
 import { requireRole } from '../middleware/auth.js';
 import { configPublica } from '../dian/arco.js';
 import { probarConexion } from '../dian/cliente.js';
+import { configPublica as configPublicaFactus } from '../dian/factus.js';
+import { probarConexion as probarConexionFactus } from '../dian/facturas-factus.js';
 
 export const router = Router();
 
 router.get('/', async (_req, res) => {
   const { rows } = await pool.query(
-    `select id, nombre, nit, es_facturador_dian, prefijo_factura,
-            (arco_config is not null and arco_config->>'host' is not null) as arco_configurada
+    `select id, nombre, nit, es_facturador_dian, prefijo_factura, proveedor_dian,
+            (arco_config is not null and arco_config->>'host' is not null) as arco_configurada,
+            (factus_config is not null and factus_config->>'client_id' is not null) as factus_configurada
      from empresa order by nombre`
   );
   res.json(rows);
+});
+
+// Elige qué proveedor de facturación electrónica usa la empresa (arco | factus).
+router.put('/:id/proveedor-dian', requireRole('admin'), async (req, res) => {
+  const { proveedor } = req.body || {};
+  if (!['arco', 'factus'].includes(proveedor)) return res.status(400).json({ error: 'proveedor debe ser arco o factus' });
+  const { rows } = await pool.query('update empresa set proveedor_dian = $1 where id = $2 returning id', [proveedor, req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'Empresa no encontrada' });
+  res.json({ ok: true, proveedor_dian: proveedor });
 });
 
 // Configuración de Arco (solo admin). La contraseña nunca se devuelve.
@@ -68,6 +80,63 @@ router.post('/:id/arco/probar', requireRole('admin'), async (req, res) => {
   };
   try {
     res.json(await probarConexion(cfg));
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// --- Factus (nuevo proveedor de facturación electrónica) ---
+
+router.get('/:id/factus', requireRole('admin'), async (req, res) => {
+  const { rows } = await pool.query('select nombre, factus_config from empresa where id = $1', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'Empresa no encontrada' });
+  res.json({ empresa: rows[0].nombre, config: configPublicaFactus(rows[0].factus_config) });
+});
+
+router.put('/:id/factus', requireRole('admin'), async (req, res) => {
+  const { rows } = await pool.query('select factus_config from empresa where id = $1', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'Empresa no encontrada' });
+  const anterior = rows[0].factus_config || {};
+  const b = req.body || {};
+  const config = {
+    base_url: (b.base_url || anterior.base_url || 'https://api-sandbox.factus.com.co').trim().replace(/\/$/, ''),
+    client_id: (b.client_id || '').trim() || anterior.client_id,
+    client_secret: b.client_secret ? String(b.client_secret) : anterior.client_secret, // si viene vacío, se conserva
+    email: (b.email || '').trim() || anterior.email,
+    password: b.password ? String(b.password) : anterior.password, // si viene vacía, se conserva
+    numbering_range_id_factura: b.numbering_range_id_factura ? Number(b.numbering_range_id_factura) : (anterior.numbering_range_id_factura || null),
+    numbering_range_id_nota_credito: b.numbering_range_id_nota_credito ? Number(b.numbering_range_id_nota_credito) : (anterior.numbering_range_id_nota_credito || null),
+    payment_method_code_default: (b.payment_method_code_default || anterior.payment_method_code_default || '42').trim(),
+    municipality_code_default: (b.municipality_code_default || anterior.municipality_code_default || '05001').trim(),
+    cliente_default: b.cliente_default || anterior.cliente_default || null,
+  };
+  if (!config.base_url || !config.client_id || !config.client_secret || !config.email || !config.password) {
+    return res.status(400).json({ error: 'base_url, client_id, client_secret, email y password son obligatorios' });
+  }
+  await pool.query('update empresa set factus_config = $1, es_facturador_dian = true where id = $2', [config, req.params.id]);
+  res.json({ ok: true, config: configPublicaFactus(config) });
+});
+
+router.delete('/:id/factus', requireRole('admin'), async (req, res) => {
+  await pool.query('update empresa set factus_config = null where id = $1', [req.params.id]);
+  res.json({ ok: true });
+});
+
+// Prueba credenciales (las del body, o las guardadas si no se envía password) y
+// devuelve los rangos de numeración disponibles para elegir cuál usar.
+router.post('/:id/factus/probar', requireRole('admin'), async (req, res) => {
+  const { rows } = await pool.query('select factus_config from empresa where id = $1', [req.params.id]);
+  const guardada = rows[0]?.factus_config || {};
+  const b = req.body || {};
+  const cfg = {
+    base_url: b.base_url || guardada.base_url || 'https://api-sandbox.factus.com.co',
+    client_id: b.client_id || guardada.client_id,
+    client_secret: b.client_secret || guardada.client_secret,
+    email: b.email || guardada.email,
+    password: b.password || guardada.password,
+  };
+  try {
+    res.json(await probarConexionFactus(cfg));
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message });
   }

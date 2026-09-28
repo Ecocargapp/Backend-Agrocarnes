@@ -40,7 +40,8 @@ está en [`docs/`](docs/README.md); el historial de versiones en
   - `ventas.js` — venta al cliente final; descuenta inventario y dispara el envío a la DIAN en segundo plano.
   - `cartera.js` — cuentas por cobrar (recibos de caja) y por pagar (pagos a proveedores), con antigüedad de saldos.
   - `notas-credito.js` — notas crédito y anulación de facturas de venta.
-- `src/dian/cliente.js`, `src/dian/notas.js` — integración con Arco: facturas y notas crédito.
+- `src/dian/cliente.js`, `src/dian/notas.js` — despachan a Arco o Factus según `empresa.proveedor_dian`.
+- `src/dian/arco.js`, `src/dian/facturas-factus.js`, `src/dian/notas-factus.js`, `src/dian/factus.js` — clientes e implementación por proveedor.
 - `nginx/agrocarnes.conf` — server blocks separados de los de AgroSoft.
 - `ecosystem.config.cjs` — proceso pm2 `agrocarnes-api`.
 
@@ -109,26 +110,43 @@ cd /var/www/agrocarnes-backend && git pull && npm install --omit=dev && npm run 
 cd /var/www/app-agrocarnes && git pull
 ```
 
-## Facturación electrónica DIAN (vía Arco ERP)
+## Facturación electrónica DIAN (Arco o Factus, por empresa)
 
-La facturación electrónica se hace a través de **Arco ERP** (`src/dian/`):
-Arco numera la factura con su resolución, la firma y la transmite a la DIAN.
+Cada empresa elige su proveedor de facturación electrónica con
+`empresa.proveedor_dian` (`arco` | `factus`, pantalla **Configuración**):
+`src/dian/cliente.js` y `src/dian/notas.js` despachan a la implementación
+correspondiente. Factus se agregó en paralelo a Arco (no lo reemplaza en
+código, solo se puede elegir por empresa) mientras se completa la migración.
 
+**Arco ERP** — Arco numera la factura con su resolución, la firma y la
+transmite a la DIAN.
 - `src/dian/arco.js` — cliente HTTP (login → token `OAuth`, renovación automática).
-- `src/dian/cliente.js` — `enviarFacturaADian` (Factura/Insert), `sincronizarEstado`
-  (Factura/Get → CUFE), `probarConexion` y el job que reintenta cada 2 min.
-- Configuración por empresa en `empresa.arco_config` (pantalla **Configuración**,
-  solo admin): host, company, user, password, DocumentoId, SucursalId, BodegaId,
-  ClienteId de consumidor final. Cada NIT necesita su propia cuenta de Arco.
-- Cada producto vendido necesita `arco_producto_id` (el ProductoId con el que
-  existe en Arco) y `impuesto_pct` si el precio incluye IVA/impoconsumo.
-- Los clientes con documento se crean en Arco (Tercero/Insert + Cliente/Insert)
-  la primera vez que se les factura; el id queda en `tercero.arco_cliente_id`.
-- Estados en `factura_venta.estado_dian`: pendiente · sin_configurar · enviada ·
-  aceptada (CUFE) · error (se reintenta) · rechazada. Mensaje en `dian_mensaje`.
-- Variables: `DIAN_JOB=off` desactiva el job (útil en pruebas locales).
+- `src/dian/cliente.js` / `src/dian/notas.js` (funciones `*Arco`) —
+  `Factura/Insert` + `Factura/Get` (CUFE), `NotaCredito/Insert` + `NotaCredito/Get`.
+- Configuración por empresa en `empresa.arco_config`: host, company, user,
+  password, DocumentoId, SucursalId, BodegaId, ClienteId de consumidor final.
+- Cada producto vendido necesita `arco_producto_id` y `impuesto_pct`.
+- Documentación de Arco: https://documenter.getpostman.com/view/289978/UzJFweL6
 
-Documentación de Arco: https://documenter.getpostman.com/view/289978/UzJFweL6
+**Factus** (`developers.factus.com.co`) — valida y firma en la misma llamada
+(normalmente ya devuelve el CUFE de inmediato).
+- `src/dian/factus.js` — cliente HTTP (OAuth2 `password` grant + refresh token).
+- `src/dian/facturas-factus.js` / `src/dian/notas-factus.js` —
+  `POST /v2/bills/validate`, `POST /v2/credit-notes/validate`.
+- Configuración por empresa en `empresa.factus_config`: base_url (sandbox o
+  producción), client_id, client_secret, email, password, rangos de
+  numeración de facturas y notas crédito, cliente por defecto.
+- Cada producto vendido puede tener `factus_unidad_medida_code` (si está
+  vacío se infiere de `unidad_medida`) y usa el mismo `impuesto_pct`.
+- Probado contra el sandbox real de Factus (login, rangos de numeración,
+  factura y nota crédito) — ver docs/05 para el detalle y los pendientes
+  antes de facturar de verdad.
+
+Comunes a ambos proveedores:
+- Estados en `factura_venta.estado_dian` / `nota_credito.estado_dian`:
+  pendiente · sin_configurar · enviada · aceptada (CUFE) · error (se
+  reintenta) · rechazada. Mensaje en `dian_mensaje`.
+- Variables: `DIAN_JOB=off` desactiva el job de reintentos (útil en pruebas locales).
 
 ## Cartera y notas crédito
 

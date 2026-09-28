@@ -142,3 +142,61 @@ order by fecha;
 
 Toda fila debería estar en `aceptada` con `cufe` no nulo. Las que no lo
 estén tienen en `dian_mensaje` la causa y son las que requieren gestión.
+
+## Factus (nuevo proveedor, en transición desde Arco)
+
+Se agregó Factus (`developers.factus.com.co`) como segundo proveedor de
+facturación y nómina electrónica, para reemplazar a Arco. Se implementó **en
+paralelo**, sin quitar Arco: cada empresa elige su proveedor activo con
+`empresa.proveedor_dian` (`arco` | `factus`, pantalla Configuración), así se
+puede probar o migrar una empresa a la vez sin afectar a las demás.
+
+- `src/dian/factus.js`: cliente HTTP con autenticación OAuth2 (grant
+  `password`, refresh con `refresh_token`), igual patrón que `arco.js`.
+- `src/dian/facturas-factus.js` / `src/dian/notas-factus.js`: arman el JSON
+  de Factus y llaman `POST /v2/bills/validate` / `POST /v2/credit-notes/validate`.
+  A diferencia de Arco, Factus **valida y firma en la misma llamada** —
+  normalmente ya devuelve el CUFE de una vez, sin necesitar un paso de
+  sincronización aparte (aunque `sincronizarEstado`/`sincronizarNotaCredito`
+  existen por si Factus responde sin CUFE y hay que consultarlo después).
+- `src/dian/cliente.js` y `src/dian/notas.js` ahora son **despachadores**:
+  `enviarFacturaADian`/`sincronizarEstado` (y sus equivalentes de notas)
+  consultan `empresa.proveedor_dian` y delegan a la implementación de Arco o
+  de Factus; el job en segundo plano (`iniciarJobDian`,
+  `iniciarJobNotasCredito`) recorre empresas con cualquiera de los dos
+  proveedores configurados.
+- El `reference_code` que se envía a Factus es simplemente el id local de la
+  factura/nota (`AGC-<id>` / `AGC-NC-<id>`), lo que hace el envío idempotente
+  ante reintentos sin necesitar columnas nuevas; el "número" que Factus
+  asigna (ej. `SETP990021506`, `CRTE713`) se guarda en la columna genérica
+  `consecutivo` que ya existía para Arco.
+- Nuevas columnas: `empresa.factus_config` (credenciales, rangos de
+  numeración, cliente por defecto), `empresa.proveedor_dian`,
+  `producto.factus_unidad_medida_code` (código UN/CEFACT; si está vacío se
+  infiere de `unidad_medida`) y `producto.factus_estandar_code` (código de
+  bien/servicio, `999` = no aplica por defecto).
+
+**Probado contra el sandbox real de Factus** (`api-sandbox.factus.com.co`,
+28/09/2026): login OAuth2, `GET /v2/numbering-ranges` (rango 389 = facturas,
+1776 = notas crédito, cuenta de pruebas compartida), `POST /v2/bills/validate`
+con CUFE real devuelto de inmediato, y `POST /v2/credit-notes/validate`
+anulando esa factura (número `CRTE713`), correctamente enlazada a través de
+`bill_number`. También se verificó con una prueba local (sin red, con las
+respuestas reales capturadas) que `src/dian/cliente.js` y `notas.js` arman el
+payload correcto (ítems, cliente, forma de pago, rangos de numeración) y
+escriben el estado esperado en la base de datos.
+
+**Pendiente antes de facturar de verdad con Factus:**
+- Reemplazar las credenciales de prueba (`sandboxv2@factus.com.co`) por las
+  credenciales reales de cada empresa cuando Factus las entregue, y cambiar
+  `base_url` a `https://api.factus.com.co` en Configuración.
+- Confirmar `payment_method_code` para ventas a crédito (se usa `"1"` por
+  ahora, sin verificar contra la tabla completa de medios de pago de Factus)
+  y completar la tabla de conversión Colombia-DIAN si aparecen más casos
+  (retenciones, IVA excluido vs. 0%, etc.).
+- Revisar `factus_unidad_medida_code` de los productos que no sean `kg`/`un`/
+  `lb`/`g`/`l` (el valor por defecto `94` = unidad es un comodín razonable
+  pero no siempre exacto).
+- Nómina electrónica de Factus: no se implementó en esta iteración (solo
+  facturación de venta y notas crédito); queda para cuando se decida
+  reemplazar también la nómina.

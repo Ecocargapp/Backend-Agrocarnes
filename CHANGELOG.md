@@ -10,6 +10,35 @@ entrega del día).
 
 ---
 
+## 2026.09.28.8 — Factus como nuevo proveedor de facturación electrónica
+
+- Backend: se agrega **Factus** (`developers.factus.com.co`) en paralelo a
+  Arco, sin quitarlo: cada empresa elige su proveedor activo
+  (`empresa.proveedor_dian`, `arco` | `factus`). `src/dian/factus.js`
+  (cliente OAuth2), `src/dian/facturas-factus.js` y `src/dian/notas-factus.js`
+  (envío de facturas y notas crédito). `src/dian/cliente.js` y `notas.js`
+  ahora despachan a Arco o a Factus según la empresa; el job de reintentos
+  cubre ambos proveedores.
+- Backend: `GET/PUT/DELETE /empresas/:id/factus` (configuración) y
+  `POST /empresas/:id/factus/probar` (prueba credenciales y lista los rangos
+  de numeración disponibles); `PUT /empresas/:id/proveedor-dian` para elegir
+  el proveedor activo.
+- Frontend: pantalla **Configuración** ahora tiene un selector de proveedor
+  por empresa y el formulario de cuenta de Factus (credenciales, entorno
+  sandbox/producción, rangos de numeración, botón "Probar conexión"); en
+  **Inventario**, columna editable para el código de unidad de medida de
+  Factus por producto (opcional; si está vacío se infiere de la unidad).
+- Migración `005_factus.sql`: `empresa.factus_config`, `empresa.proveedor_dian`,
+  `producto.factus_unidad_medida_code`, `producto.factus_estandar_code`.
+- Probado contra el **sandbox real de Factus** con las credenciales de
+  prueba que dio Factus: login OAuth2, `GET /v2/numbering-ranges`, creación
+  de una factura con CUFE real devuelto de inmediato, y una nota crédito de
+  anulación referenciándola correctamente. También se verificó localmente
+  (sin red, con las respuestas reales capturadas) que el payload armado por
+  `cliente.js`/`notas.js` es correcto y que el estado queda bien guardado en
+  la base de datos. Detalle y pendientes antes de facturar de verdad con
+  Factus en docs/05.
+
 ## 2026.09.28.7 — Pantallas de cartera y notas crédito; informes a Excel
 
 - Frontend: pantalla **Cartera** (por cobrar / por pagar) con resumen,

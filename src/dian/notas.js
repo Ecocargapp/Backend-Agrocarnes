@@ -1,6 +1,7 @@
-// Notas crédito electrónicas a través de Arco ERP.
+// Notas crédito electrónicas — despacha a Arco o a Factus según
+// empresa.proveedor_dian (ver src/dian/notas-factus.js para Factus).
 //
-// Mismo flujo que src/dian/cliente.js pero para NotaCredito:
+// Lo de abajo es el flujo con Arco ERP, igual que src/dian/cliente.js pero para NotaCredito:
 //   1. routes/notas-credito.js crea la nota local con estado_dian = 'pendiente'
 //      (solo si la factura original fue emitida electrónicamente; si no, queda
 //      'no_aplica' y nunca se envía).
@@ -22,8 +23,17 @@
 
 import { pool } from '../db/pool.js';
 import { ArcoClient, ArcoError } from './arco.js';
+import * as factusNotas from './notas-factus.js';
 
 const MAX_INTENTOS = 12;
+
+async function proveedorDe(notaId) {
+  const { rows } = await pool.query(
+    `select e.proveedor_dian from nota_credito n join empresa e on e.id = n.empresa_id where n.id = $1`,
+    [notaId]
+  );
+  return rows[0]?.proveedor_dian || 'arco';
+}
 
 async function cargarNota(notaId) {
   const { rows } = await pool.query(
@@ -76,6 +86,16 @@ function armarDetalle(n, cfg) {
 }
 
 export async function enviarNotaCreditoADian(notaId) {
+  if ((await proveedorDe(notaId)) === 'factus') return factusNotas.enviarNotaCreditoADian(notaId);
+  return enviarNotaCreditoADianArco(notaId);
+}
+
+export async function sincronizarNotaCredito(notaId) {
+  if ((await proveedorDe(notaId)) === 'factus') return factusNotas.sincronizarNotaCredito(notaId);
+  return sincronizarNotaCreditoArco(notaId);
+}
+
+async function enviarNotaCreditoADianArco(notaId) {
   const n = await cargarNota(notaId);
   const cfg = n.arco_config;
 
@@ -88,7 +108,7 @@ export async function enviarNotaCreditoADian(notaId) {
     await marcar(notaId, 'error', { dian_mensaje: 'La factura original no tiene FacturaId de Arco (no fue emitida electrónicamente)' });
     return { estado: 'error' };
   }
-  if (n.arco_nota_id) return sincronizarNotaCredito(notaId); // ya está en Arco; solo refrescar
+  if (n.arco_nota_id) return sincronizarNotaCreditoArco(notaId); // ya está en Arco; solo refrescar
 
   try {
     const arco = new ArcoClient(cfg);
@@ -110,7 +130,7 @@ export async function enviarNotaCreditoADian(notaId) {
 
     if (!r?.NotaCreditoId) throw new Error(`Arco no devolvió NotaCreditoId: ${JSON.stringify(r).slice(0, 300)}`);
     await marcar(notaId, 'enviada', { arco_nota_id: String(r.NotaCreditoId), dian_mensaje: null, dian_intentos: 0 });
-    return sincronizarNotaCredito(notaId);
+    return sincronizarNotaCreditoArco(notaId);
   } catch (err) {
     const intentos = Number(n.dian_intentos || 0) + 1;
     const definitivo = err instanceof ArcoError && err.status && err.status >= 400 && err.status < 500 && err.status !== 401 && err.status !== 429;
@@ -120,7 +140,7 @@ export async function enviarNotaCreditoADian(notaId) {
   }
 }
 
-export async function sincronizarNotaCredito(notaId) {
+async function sincronizarNotaCreditoArco(notaId) {
   const n = await cargarNota(notaId);
   if (!n.arco_nota_id || !n.arco_config?.host) return { estado: n.estado_dian };
   try {
@@ -155,7 +175,7 @@ export function iniciarJobNotasCredito({ cadaMs = 2 * 60 * 1000 } = {}) {
       const { rows } = await pool.query(
         `select n.id, n.estado_dian from nota_credito n
          join empresa e on e.id = n.empresa_id
-         where e.arco_config is not null
+         where (e.arco_config is not null or e.factus_config is not null)
            and (
              (n.estado_dian in ('pendiente', 'error', 'sin_configurar') and n.dian_intentos < $1
                and (n.dian_ultimo_intento is null or n.dian_ultimo_intento < now() - interval '2 minutes'))

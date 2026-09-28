@@ -12,8 +12,17 @@
 
 import { pool } from '../db/pool.js';
 import { ArcoClient, ArcoError } from './arco.js';
+import * as factusFacturas from './facturas-factus.js';
 
 const MAX_INTENTOS = 12;
+
+async function proveedorDe(facturaId) {
+  const { rows } = await pool.query(
+    `select e.proveedor_dian from factura_venta f join empresa e on e.id = f.empresa_id where f.id = $1`,
+    [facturaId]
+  );
+  return rows[0]?.proveedor_dian || 'arco';
+}
 
 async function cargarFactura(facturaId) {
   const { rows } = await pool.query(
@@ -150,6 +159,16 @@ function armarDetalle(f, cfg) {
 }
 
 export async function enviarFacturaADian(facturaId) {
+  if ((await proveedorDe(facturaId)) === 'factus') return factusFacturas.enviarFacturaADian(facturaId);
+  return enviarFacturaADianArco(facturaId);
+}
+
+export async function sincronizarEstado(facturaId) {
+  if ((await proveedorDe(facturaId)) === 'factus') return factusFacturas.sincronizarEstado(facturaId);
+  return sincronizarEstadoArco(facturaId);
+}
+
+async function enviarFacturaADianArco(facturaId) {
   const f = await cargarFactura(facturaId);
   const cfg = f.arco_config;
 
@@ -157,7 +176,7 @@ export async function enviarFacturaADian(facturaId) {
     await marcar(facturaId, 'sin_configurar', { dian_mensaje: `${f.empresa_nombre} no tiene configurada la cuenta de Arco` });
     return { estado: 'sin_configurar' };
   }
-  if (f.arco_factura_id) return sincronizarEstado(facturaId); // ya está en Arco; solo refrescar
+  if (f.arco_factura_id) return sincronizarEstadoArco(facturaId); // ya está en Arco; solo refrescar
 
   try {
     const arco = new ArcoClient(cfg);
@@ -201,7 +220,7 @@ export async function enviarFacturaADian(facturaId) {
 
     if (!r?.FacturaId) throw new Error(`Arco no devolvió FacturaId: ${JSON.stringify(r).slice(0, 300)}`);
     await marcar(facturaId, 'enviada', { arco_factura_id: String(r.FacturaId), dian_mensaje: null, dian_intentos: 0 });
-    return sincronizarEstado(facturaId);
+    return sincronizarEstadoArco(facturaId);
   } catch (err) {
     const intentos = Number(f.dian_intentos || 0) + 1;
     const definitivo = err instanceof ArcoError && err.status && err.status >= 400 && err.status < 500 && err.status !== 401 && err.status !== 429;
@@ -211,7 +230,7 @@ export async function enviarFacturaADian(facturaId) {
   }
 }
 
-export async function sincronizarEstado(facturaId) {
+async function sincronizarEstadoArco(facturaId) {
   const f = await cargarFactura(facturaId);
   if (!f.arco_factura_id || !f.arco_config?.host) return { estado: f.estado_dian };
   try {
@@ -274,7 +293,7 @@ export function iniciarJobDian({ cadaMs = 2 * 60 * 1000 } = {}) {
       const { rows } = await pool.query(
         `select f.id, f.estado_dian from factura_venta f
          join empresa e on e.id = f.empresa_id
-         where e.arco_config is not null
+         where (e.arco_config is not null or e.factus_config is not null)
            and (
              (f.estado_dian in ('pendiente', 'error', 'sin_configurar') and f.dian_intentos < $1
                and (f.dian_ultimo_intento is null or f.dian_ultimo_intento < now() - interval '2 minutes'))
