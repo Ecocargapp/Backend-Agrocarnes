@@ -57,3 +57,18 @@ router.post('/', async (req, res) => {
     client.release();
   }
 });
+
+router.get('/', async (_req, res) => {
+  const { rows } = await pool.query(`
+    select t.id, t.creado_en, p.nombre as producto, p.unidad_medida, t.cantidad, t.costo_unitario,
+           bo.nombre as bodega_origen, eo.nombre as empresa_origen,
+           bd.nombre as bodega_destino, ed.nombre as empresa_destino,
+           t.es_venta_intercompania
+    from traslado t
+    join producto p on p.id = t.producto_id
+    join bodega bo on bo.id = t.bodega_origen_id join empresa eo on eo.id = bo.empresa_id
+    join bodega bd on bd.id = t.bodega_destino_id join empresa ed on ed.id = bd.empresa_id
+    order by t.creado_en desc limit 200
+  `);
+  res.json(rows);
+});

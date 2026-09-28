@@ -11,9 +11,15 @@ import { router as comprasRouter } from './routes/compras.js';
 import { router as trasladosRouter } from './routes/traslados.js';
 import { router as produccionRouter } from './routes/produccion.js';
 import { router as ventasRouter } from './routes/ventas.js';
+import { router as bodegasRouter } from './routes/bodegas.js';
+import { router as tercerosRouter } from './routes/terceros.js';
+import { router as recetasRouter } from './routes/recetas.js';
 
 const app = express();
-app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') || '*' }));
+const corsOrigin = process.env.CORS_ORIGIN;
+app.use(cors({
+  origin: !corsOrigin || corsOrigin === '*' ? true : corsOrigin.split(',').map((o) => o.trim()),
+}));
 app.use(express.json());
 
 app.get('/health', (_req, res) => res.json({ ok: true, servicio: 'agrocarnes-api' }));
@@ -28,6 +34,9 @@ app.use('/compras', requireAuth, comprasRouter);
 app.use('/traslados', requireAuth, trasladosRouter);
 app.use('/produccion', requireAuth, produccionRouter);
 app.use('/ventas', requireAuth, ventasRouter);
+app.use('/bodegas', requireAuth, bodegasRouter);
+app.use('/terceros', requireAuth, tercerosRouter);
+app.use('/recetas', requireAuth, recetasRouter);
 
 app.use((err, _req, res, _next) => {
   console.error(err);

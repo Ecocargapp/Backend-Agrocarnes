@@ -56,9 +56,28 @@ router.post('/', async (req, res) => {
 router.get('/', async (req, res) => {
   const { empresa_id } = req.query;
   const params = [];
-  let sql = 'select * from compra';
-  if (empresa_id) { params.push(empresa_id); sql += ' where empresa_id = $1'; }
-  sql += ' order by fecha desc, creado_en desc limit 200';
-  const { rows } = await pool.query(sql, params);
+  let where = '';
+  if (empresa_id) { params.push(empresa_id); where = 'where c.empresa_id = $1'; }
+  const { rows } = await pool.query(
+    `select c.id, c.fecha, c.numero_factura_proveedor, c.total, c.creado_en,
+            e.nombre as empresa, t.nombre as proveedor,
+            (select count(*)::int from compra_item i where i.compra_id = c.id) as items
+     from compra c
+     join empresa e on e.id = c.empresa_id
+     join tercero t on t.id = c.proveedor_id
+     ${where}
+     order by c.fecha desc, c.creado_en desc limit 200`,
+    params
+  );
+  res.json(rows);
+});
+
+router.get('/:id', async (req, res) => {
+  const { rows } = await pool.query(
+    `select i.cantidad, i.costo_unitario, p.nombre as producto, p.unidad_medida, b.nombre as bodega
+     from compra_item i join producto p on p.id = i.producto_id join bodega b on b.id = i.bodega_id
+     where i.compra_id = $1 order by p.nombre`,
+    [req.params.id]
+  );
   res.json(rows);
 });

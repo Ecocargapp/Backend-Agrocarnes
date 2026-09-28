@@ -15,14 +15,24 @@ router.post('/', async (req, res) => {
 
   const client = await pool.connect();
   let facturaId;
+  let consecutivo;
   try {
     await client.query('begin');
 
+    // Consecutivo por empresa (bloqueando la fila para que no se repita).
+    const { rows: empRows } = await client.query(
+      `update empresa set ultimo_consecutivo = ultimo_consecutivo + 1
+       where id = $1 returning prefijo_factura, ultimo_consecutivo`,
+      [empresa_id]
+    );
+    if (!empRows[0]) throw new Error('Empresa no encontrada');
+    consecutivo = `${empRows[0].prefijo_factura || 'FV'}-${String(empRows[0].ultimo_consecutivo).padStart(6, '0')}`;
+
     const total = items.reduce((acc, it) => acc + Number(it.cantidad) * Number(it.precio_unitario), 0);
     const { rows: facturaRows } = await client.query(
-      `insert into factura_venta (empresa_id, cliente_id, total)
-       values ($1, $2, $3) returning id`,
-      [empresa_id, cliente_id || null, total]
+      `insert into factura_venta (empresa_id, cliente_id, consecutivo, total)
+       values ($1, $2, $3, $4) returning id`,
+      [empresa_id, cliente_id || null, consecutivo, total]
     );
     facturaId = facturaRows[0].id;
 
@@ -59,11 +69,41 @@ router.post('/', async (req, res) => {
     console.error(`No se pudo enviar la factura ${facturaId} a la DIAN:`, err.message);
   });
 
-  res.status(201).json({ id: facturaId });
+  res.status(201).json({ id: facturaId, consecutivo });
+});
+
+router.get('/', async (req, res) => {
+  const { empresa_id } = req.query;
+  const params = [];
+  let where = '';
+  if (empresa_id) { params.push(empresa_id); where = 'where f.empresa_id = $1'; }
+  const { rows } = await pool.query(
+    `select f.id, f.consecutivo, f.fecha, f.total, f.estado_dian, f.cufe,
+            e.nombre as empresa, t.nombre as cliente,
+            (select count(*)::int from factura_venta_item i where i.factura_venta_id = f.id) as items
+     from factura_venta f
+     join empresa e on e.id = f.empresa_id
+     left join tercero t on t.id = f.cliente_id
+     ${where}
+     order by f.fecha desc limit 200`,
+    params
+  );
+  res.json(rows);
 });
 
 router.get('/:id', async (req, res) => {
-  const { rows } = await pool.query('select * from factura_venta where id = $1', [req.params.id]);
+  const { rows } = await pool.query(
+    `select f.*, e.nombre as empresa, t.nombre as cliente
+     from factura_venta f join empresa e on e.id = f.empresa_id
+     left join tercero t on t.id = f.cliente_id where f.id = $1`,
+    [req.params.id]
+  );
   if (!rows[0]) return res.status(404).json({ error: 'Factura no encontrada' });
-  res.json(rows[0]);
+  const { rows: items } = await pool.query(
+    `select i.cantidad, i.precio_unitario, p.nombre as producto, p.unidad_medida
+     from factura_venta_item i join producto p on p.id = i.producto_id
+     where i.factura_venta_id = $1 order by p.nombre`,
+    [req.params.id]
+  );
+  res.json({ ...rows[0], items });
 });

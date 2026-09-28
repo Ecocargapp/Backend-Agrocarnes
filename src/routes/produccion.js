@@ -56,6 +56,8 @@ router.post('/', async (req, res) => {
       referencia_tipo: 'orden_produccion', referencia_id: ordenId, creado_por: req.usuario?.sub,
     });
 
+    await client.query('update orden_produccion set costo_unitario = $1 where id = $2', [costoUnitarioTerminado, ordenId]);
+
     await client.query('commit');
     res.status(201).json({ id: ordenId, costo_unitario_terminado: costoUnitarioTerminado });
   } catch (err) {
@@ -64,4 +66,17 @@ router.post('/', async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+router.get('/', async (_req, res) => {
+  const { rows } = await pool.query(`
+    select o.id, o.creado_en, p.nombre as producto, p.unidad_medida, o.cantidad_producida,
+           o.costo_unitario, b.nombre as bodega, e.nombre as empresa
+    from orden_produccion o
+    join producto p on p.id = o.producto_terminado_id
+    join bodega b on b.id = o.bodega_id
+    join empresa e on e.id = o.empresa_id
+    order by o.creado_en desc limit 200
+  `);
+  res.json(rows);
 });
