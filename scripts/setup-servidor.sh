@@ -61,7 +61,10 @@ if [ ! -d "$BACKEND_DIR/.git" ]; then
   sudo chown "$USER:$USER" "$BACKEND_DIR"
   git clone -q "$BACKEND_REPO" "$BACKEND_DIR"
 else
-  git -C "$BACKEND_DIR" pull -q
+  # La carpeta de despliegue refleja exactamente main: no se editan archivos ahí.
+  git -C "$BACKEND_DIR" fetch -q origin
+  git -C "$BACKEND_DIR" reset -q --hard origin/main
+  git -C "$BACKEND_DIR" clean -fdq -e .env -e node_modules
 fi
 cd "$BACKEND_DIR"
 
@@ -131,7 +134,9 @@ if [ ! -d "$FRONTEND_DIR/.git" ]; then
   sudo chown "$USER:$USER" "$FRONTEND_DIR"
   git clone -q "$FRONTEND_REPO" "$FRONTEND_DIR"
 else
-  git -C "$FRONTEND_DIR" pull -q
+  git -C "$FRONTEND_DIR" fetch -q origin
+  git -C "$FRONTEND_DIR" reset -q --hard origin/main
+  git -C "$FRONTEND_DIR" clean -fdq
 fi
 
 # -------------------------------------------------------------------- nginx
