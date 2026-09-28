@@ -1,4 +1,4 @@
-// pm2 start ecosystem.config.js
+// pm2 start ecosystem.config.cjs
 // Proceso propio de Agrocarnes, separado de agrosoft-api.
 module.exports = {
   apps: [

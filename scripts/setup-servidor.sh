@@ -4,7 +4,7 @@
 # ubuntu). Convive con AgroSoft en la misma máquina sin tocar nada suyo.
 #
 # Uso (una sola línea, desde la terminal del servidor):
-#   bash <(curl -fsSL https://raw.githubusercontent.com/Ecocargapp/Backend-Agrocarnes/main/scripts/setup-servidor.sh) correo-del-admin@ejemplo.com
+#   bash <(curl -fsSL https://raw.githubusercontent.com/Ecocargapp/Backend-Agrocarnes/main/scripts/setup-servidor.sh) correo-del-admin@ejemplo.com [clave-del-admin]
 #
 # Es idempotente: se puede volver a correr para actualizar (hace git pull,
 # migraciones pendientes y reinicia pm2) sin duplicar nada.
@@ -97,16 +97,19 @@ npm install --omit=dev --no-audit --no-fund --loglevel=error
 npm run migrate
 
 # ------------------------------------------------------------- usuario admin
-ADMIN_PASS=""
+ADMIN_PASS="${2:-}"
 if [ -n "$ADMIN_EMAIL" ]; then
   set -a; . ./.env; set +a
   HAY_ADMIN=$(PGPASSWORD="$PGPASSWORD" psql -h localhost -U "$PGUSER" -d "$PGDATABASE" -tAc "select 1 from usuario where email='$ADMIN_EMAIL'")
-  if [ "$HAY_ADMIN" != "1" ]; then
+  if [ -n "$ADMIN_PASS" ]; then
+    # Contraseña pasada como 2º argumento: crea el admin o le fija esa clave.
+    node scripts/crear_admin.js "$ADMIN_EMAIL" "$ADMIN_PASS" "Administrador"
+  elif [ "$HAY_ADMIN" != "1" ]; then
     ADMIN_PASS=$(openssl rand -base64 12 | tr -d '/+=' | cut -c1-14)
     node scripts/crear_admin.js "$ADMIN_EMAIL" "$ADMIN_PASS" "Administrador" >/dev/null
     log "Usuario admin creado"
   else
-    echo "El usuario admin $ADMIN_EMAIL ya existe."
+    echo "El usuario admin $ADMIN_EMAIL ya existe (para cambiar su clave: pásala como 2º argumento)."
   fi
 fi
 
@@ -115,7 +118,7 @@ log "Proceso pm2 'agrocarnes-api' (independiente de agrosoft-api)"
 if pm2 describe agrocarnes-api >/dev/null 2>&1; then
   pm2 restart agrocarnes-api --update-env >/dev/null
 else
-  pm2 start ecosystem.config.js >/dev/null
+  pm2 start ecosystem.config.cjs >/dev/null
 fi
 pm2 save >/dev/null
 sleep 2

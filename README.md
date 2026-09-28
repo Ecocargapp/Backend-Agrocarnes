@@ -35,7 +35,7 @@ AgroSoft salvo la máquina física.
 - `src/dian/cliente.js` — el único archivo que se llena cuando se elija el
   proveedor tecnológico de facturación electrónica. Hoy es un placeholder.
 - `nginx/agrocarnes.conf` — server blocks separados de los de AgroSoft.
-- `ecosystem.config.js` — proceso pm2 `agrocarnes-api`.
+- `ecosystem.config.cjs` — proceso pm2 `agrocarnes-api`.
 
 ## Instalación local
 
@@ -72,7 +72,7 @@ npm install --omit=dev
 npm run migrate
 node scripts/crear_admin.js tu-email@ejemplo.com "tu-clave" "Tu Nombre"
 
-pm2 start ecosystem.config.js
+pm2 start ecosystem.config.cjs
 pm2 save                 # sobrevive al reinicio, igual que agrosoft-api
 curl http://127.0.0.1:4001/health
 ```
