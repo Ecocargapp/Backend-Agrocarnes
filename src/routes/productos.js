@@ -7,7 +7,7 @@ export const router = Router();
 router.get('/', async (req, res) => {
   const { empresa_id } = req.query;
   const params = [];
-  let sql = 'select id, empresa_id, nombre, tipo, unidad_medida, arco_producto_id, impuesto_pct, factus_unidad_medida_code, factus_estandar_code from producto';
+  let sql = 'select id, empresa_id, nombre, tipo, unidad_medida, arco_producto_id, impuesto_pct, factus_unidad_medida_code, factus_estandar_code, precio_venta, maneja_inventario, tipo_impuesto from producto';
   if (empresa_id) {
     params.push(empresa_id);
     sql += ' where empresa_id = $1';
@@ -18,22 +18,25 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { empresa_id, nombre, tipo, unidad_medida, arco_producto_id, impuesto_pct, factus_unidad_medida_code, factus_estandar_code } = req.body;
+  const { empresa_id, nombre, tipo, unidad_medida, arco_producto_id, impuesto_pct, factus_unidad_medida_code, factus_estandar_code, precio_venta, maneja_inventario, tipo_impuesto } = req.body;
   if (!empresa_id || !nombre || !tipo || !unidad_medida) {
     return res.status(400).json({ error: 'Faltan campos: empresa_id, nombre, tipo, unidad_medida' });
   }
   const { rows } = await pool.query(
-    `insert into producto (empresa_id, nombre, tipo, unidad_medida, arco_producto_id, impuesto_pct, factus_unidad_medida_code, factus_estandar_code)
-     values ($1, $2, $3, $4, $5, $6, $7, $8)
-     returning id, empresa_id, nombre, tipo, unidad_medida, arco_producto_id, impuesto_pct, factus_unidad_medida_code, factus_estandar_code`,
-    [empresa_id, nombre, tipo, unidad_medida, arco_producto_id?.trim() || null, Number(impuesto_pct) || 0, factus_unidad_medida_code?.trim() || null, factus_estandar_code?.trim() || '999']
+    `insert into producto (empresa_id, nombre, tipo, unidad_medida, arco_producto_id, impuesto_pct, factus_unidad_medida_code, factus_estandar_code, precio_venta, maneja_inventario, tipo_impuesto)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     returning id, empresa_id, nombre, tipo, unidad_medida, arco_producto_id, impuesto_pct, factus_unidad_medida_code, factus_estandar_code, precio_venta, maneja_inventario, tipo_impuesto`,
+    [empresa_id, nombre, tipo, unidad_medida, arco_producto_id?.trim() || null, Number(impuesto_pct) || 0, factus_unidad_medida_code?.trim() || null, factus_estandar_code?.trim() || '999',
+     precio_venta === undefined || precio_venta === '' ? null : Number(precio_venta),
+     maneja_inventario === undefined ? true : maneja_inventario === true || maneja_inventario === 'true' || maneja_inventario === 'on',
+     tipo_impuesto === 'INC' ? 'INC' : 'IVA']
   );
   res.status(201).json(rows[0]);
 });
 
-// Actualiza nombre, código Arco/Factus y % de impuesto.
+// Actualiza nombre, códigos Arco/Factus, impuesto, precio de venta y si maneja inventario.
 router.patch('/:id', async (req, res) => {
-  const { nombre, arco_producto_id, impuesto_pct, tipo, unidad_medida, factus_unidad_medida_code, factus_estandar_code } = req.body;
+  const { nombre, arco_producto_id, impuesto_pct, tipo, unidad_medida, factus_unidad_medida_code, factus_estandar_code, precio_venta, maneja_inventario, tipo_impuesto } = req.body;
   const { rows } = await pool.query(
     `update producto set
        nombre = coalesce($2, nombre),
@@ -42,10 +45,16 @@ router.patch('/:id', async (req, res) => {
        tipo = coalesce($5, tipo),
        unidad_medida = coalesce($6, unidad_medida),
        factus_unidad_medida_code = case when $7::text is null then factus_unidad_medida_code else nullif(trim($7), '') end,
-       factus_estandar_code = coalesce(nullif(trim($8), ''), factus_estandar_code)
+       factus_estandar_code = coalesce(nullif(trim($8), ''), factus_estandar_code),
+       precio_venta = case when $9::text is null then precio_venta else nullif(trim($9), '')::numeric end,
+       maneja_inventario = coalesce($10, maneja_inventario),
+       tipo_impuesto = coalesce($11, tipo_impuesto)
      where id = $1
-     returning id, empresa_id, nombre, tipo, unidad_medida, arco_producto_id, impuesto_pct, factus_unidad_medida_code, factus_estandar_code`,
-    [req.params.id, nombre ?? null, arco_producto_id ?? null, impuesto_pct === undefined ? null : Number(impuesto_pct), tipo ?? null, unidad_medida ?? null, factus_unidad_medida_code ?? null, factus_estandar_code ?? null]
+     returning id, empresa_id, nombre, tipo, unidad_medida, arco_producto_id, impuesto_pct, factus_unidad_medida_code, factus_estandar_code, precio_venta, maneja_inventario, tipo_impuesto`,
+    [req.params.id, nombre ?? null, arco_producto_id ?? null, impuesto_pct === undefined ? null : Number(impuesto_pct), tipo ?? null, unidad_medida ?? null, factus_unidad_medida_code ?? null, factus_estandar_code ?? null,
+     precio_venta === undefined || precio_venta === null ? null : String(precio_venta),
+     maneja_inventario === undefined ? null : maneja_inventario === true || maneja_inventario === 'true',
+     tipo_impuesto === 'INC' || tipo_impuesto === 'IVA' ? tipo_impuesto : null]
   );
   if (!rows[0]) return res.status(404).json({ error: 'Producto no encontrado' });
   res.json(rows[0]);

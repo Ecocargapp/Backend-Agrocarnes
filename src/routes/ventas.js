@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { registrarMovimiento } from '../db/inventario.js';
+import { emitidaElectronicamente } from './notas-credito.js';
 import { enviarFacturaADian, sincronizarEstado } from '../dian/cliente.js';
 
 export const router = Router();
@@ -60,6 +61,11 @@ router.post('/', async (req, res) => {
          values ($1, $2, $3, $4)`,
         [facturaId, item.producto_id, item.cantidad, item.precio_unitario]
       );
+
+      // Platos del restaurante y servicios: se facturan pero no mueven inventario.
+      const { rows: prodRows } = await client.query('select maneja_inventario from producto where id = $1', [item.producto_id]);
+      if (!prodRows[0]) throw new Error('Producto no encontrado');
+      if (prodRows[0].maneja_inventario === false) continue;
 
       const { rows: existRows } = await client.query(
         'select costo_promedio from existencia where bodega_id = $1 and producto_id = $2',
@@ -186,7 +192,7 @@ router.post('/:id/anular', async (req, res) => {
     const f = rows[0];
     if (!f) throw new Error('Factura no encontrada');
     if (f.estado !== 'vigente') throw new Error('La factura ya está anulada');
-    if (f.arco_factura_id) throw new Error('La factura ya fue emitida electrónicamente: anúlala con una nota crédito de anulación (razón 2)');
+    if (emitidaElectronicamente(f)) throw new Error('La factura ya fue emitida electrónicamente: anúlala con una nota crédito de anulación (razón 2)');
     const { rows: cobrado } = await client.query('select coalesce(sum(valor),0) as v from recibo_caja_aplicacion where factura_venta_id = $1', [f.id]);
     if (Number(cobrado[0].v) > 0 && f.forma_pago === 'credito') {
       throw new Error('La factura tiene cobros aplicados; registra primero la devolución del dinero o usa nota crédito');

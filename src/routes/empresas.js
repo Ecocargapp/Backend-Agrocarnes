@@ -106,7 +106,7 @@ router.put('/:id/factus', requireRole('admin'), async (req, res) => {
     password: b.password ? String(b.password) : anterior.password, // si viene vacía, se conserva
     numbering_range_id_factura: b.numbering_range_id_factura ? Number(b.numbering_range_id_factura) : (anterior.numbering_range_id_factura || null),
     numbering_range_id_nota_credito: b.numbering_range_id_nota_credito ? Number(b.numbering_range_id_nota_credito) : (anterior.numbering_range_id_nota_credito || null),
-    payment_method_code_default: (b.payment_method_code_default || anterior.payment_method_code_default || '42').trim(),
+    payment_method_code_default: (b.payment_method_code_default || anterior.payment_method_code_default || '10').trim(),
     municipality_code_default: (b.municipality_code_default || anterior.municipality_code_default || '05001').trim(),
     cliente_default: b.cliente_default || anterior.cliente_default || null,
   };

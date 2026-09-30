@@ -20,6 +20,11 @@ import { enviarNotaCreditoADian, sincronizarNotaCredito } from '../dian/notas.js
 
 export const router = Router();
 
+// Emitida ante la DIAN por Arco (arco_factura_id) o por Factus (CUFE / enviada).
+export function emitidaElectronicamente(f) {
+  return Boolean(f.arco_factura_id || f.cufe || ['enviada', 'aceptada'].includes(f.estado_dian));
+}
+
 const RAZONES = { 1: 'Devolución parcial', 2: 'Anulación de factura', 3: 'Rebaja o descuento', 4: 'Ajuste de precio', 5: 'Descuento pronto pago', 6: 'Descuento por volumen' };
 
 // body: { factura_venta_id, razon, items: [{producto_id, cantidad, precio_unitario}], reingresa_inventario, bodega_id, notas, anulacion }
@@ -86,7 +91,7 @@ router.post('/', async (req, res) => {
       `insert into nota_credito (empresa_id, factura_venta_id, consecutivo, razon, reingresa_inventario, bodega_id, total, notas, estado_dian, creado_por)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id`,
       [f.empresa_id, f.id, consecutivo, razon, Boolean(reingresa_inventario), reingresa_inventario ? bodegaDestino : null, total, notas || null,
-       f.arco_factura_id ? 'pendiente' : 'no_aplica', req.usuario?.sub]
+       emitidaElectronicamente(f) ? 'pendiente' : 'no_aplica', req.usuario?.sub]
     );
     notaId = nc[0].id;
 
@@ -118,8 +123,8 @@ router.post('/', async (req, res) => {
     }
     await client.query('commit');
 
-    if (f.arco_factura_id) {
-      enviarNotaCreditoADian(notaId).catch((err) => console.error(`NC ${notaId} a Arco:`, err.message));
+    if (emitidaElectronicamente(f)) {
+      enviarNotaCreditoADian(notaId).catch((err) => console.error(`NC ${notaId} a la DIAN:`, err.message));
     }
     res.status(201).json({ id: notaId, consecutivo, total, saldo_a_favor: saldoAFavor, anulacion: Boolean(anulacion) });
   } catch (err) {

@@ -10,6 +10,25 @@ entrega del día).
 
 ---
 
+## 2026.09.30.1 — Menú del restaurante, INC y ajustes para facturar en producción con Factus
+
+- Backend (migración `006_precio_venta_y_restaurante.sql`): `producto.precio_venta`
+  (precio sugerido, con impuesto), `producto.maneja_inventario` (los platos del
+  menú y servicios se facturan sin existencias ni movimiento de kardex) y
+  `producto.tipo_impuesto` (`IVA` | `INC`, impuesto nacional al consumo, que se
+  envía a Factus con el código de tributo 04).
+- Backend: ventas sin cliente se facturan al consumidor final estándar de la
+  DIAN (222222222222) aunque la empresa no tenga `cliente_default`; el medio
+  de pago de contado se toma del recibo de caja (efectivo = 10, transferencia
+  = 47, tarjeta = 48) en lugar del 42 (consignación) fijo.
+- Corrección: una factura emitida por Factus (con CUFE o enviada) no se podía
+  reconocer como electrónica — se podía anular localmente y sus notas crédito
+  quedaban en `no_aplica` sin enviarse. Ahora ambas reglas cubren Arco y Factus.
+- Frontend: en **Inventario**, precio de venta, tipo de impuesto y la marca de
+  inventario por producto; en **Ventas**, los platos del menú aparecen en el
+  punto de venta de su empresa aunque no tengan existencias y el precio se
+  prellena con el precio de venta.
+
 ## 2026.09.28.8 — Factus como nuevo proveedor de facturación electrónica
 
 - Backend: se agrega **Factus** (`developers.factus.com.co`) en paralelo a

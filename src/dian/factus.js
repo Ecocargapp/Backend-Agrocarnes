@@ -116,3 +116,24 @@ export function configPublica(config) {
   const { client_secret, password, ...resto } = config;
   return { ...resto, client_secret_guardado: Boolean(client_secret), password_guardada: Boolean(password) };
 }
+
+// Adquiriente genérico de la DIAN para ventas sin cliente identificado.
+export const CONSUMIDOR_FINAL = {
+  identification_document_code: '13',
+  identification: '222222222222',
+  names: 'Consumidor final',
+  address: 'No registra',
+  legal_organization_code: '2',
+  tribute_code: 'ZZ',
+};
+
+// Código de tributo DIAN: 01 = IVA, 04 = impuesto nacional al consumo (INC).
+export function codigoImpuesto(tipo) {
+  return tipo === 'INC' ? '04' : '01';
+}
+
+// Medio de pago local → código DIAN (tabla de medios de pago de Factus).
+const MEDIO_PAGO = { efectivo: '10', transferencia: '47', tarjeta: '48', tarjeta_credito: '48', tarjeta_debito: '49', consignacion: '42' };
+export function codigoMedioPago(medio, porDefecto) {
+  return MEDIO_PAGO[(medio || '').toLowerCase()] || porDefecto || '10';
+}

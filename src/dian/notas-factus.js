@@ -10,7 +10,7 @@
 // (por ahora "1", sin verificar contra la tabla completa de Factus) es correcto.
 
 import { pool } from '../db/pool.js';
-import { FactusClient, FactusError } from './factus.js';
+import { FactusClient, FactusError, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago } from './factus.js';
 
 const MAX_INTENTOS = 12;
 const TIPO_DOCUMENTO = { NIT: '31', CC: '13', CE: '22', TI: '12', PA: '41', PEP: '47' };
@@ -34,7 +34,7 @@ async function cargarNota(notaId) {
   if (!n) throw new Error(`Nota crédito ${notaId} no existe`);
   const { rows: items } = await pool.query(
     `select i.cantidad, i.precio_unitario, p.id as producto_id, p.nombre as producto, p.unidad_medida,
-            p.factus_unidad_medida_code, p.factus_estandar_code, p.impuesto_pct
+            p.factus_unidad_medida_code, p.factus_estandar_code, p.impuesto_pct, p.tipo_impuesto
      from nota_credito_item i join producto p on p.id = i.producto_id
      where i.nota_credito_id = $1`,
     [notaId]
@@ -55,8 +55,7 @@ async function marcar(notaId, estado_dian, extra = {}) {
 
 function clienteFactus(n, cfg) {
   if (!n.tercero_id) {
-    if (!cfg.cliente_default) throw new Error('La empresa no tiene cliente_default (consumidor final) configurado en Factus');
-    return cfg.cliente_default;
+    return cfg.cliente_default || CONSUMIDOR_FINAL;
   }
   return {
     identification_document_code: TIPO_DOCUMENTO[(n.tipo_documento || 'CC').toUpperCase()] || '13',
@@ -86,7 +85,7 @@ function armarItems(n) {
       price: (Math.round(base * 100) / 100).toFixed(2),
       unit_measure_code: unidad,
       standard_code: i.factus_estandar_code || '999',
-      taxes: pct > 0 ? [{ code: '01', rate: pct.toFixed(2) }] : [],
+      taxes: pct > 0 ? [{ code: codigoImpuesto(i.tipo_impuesto), rate: pct.toFixed(2) }] : [],
     };
   });
 }
@@ -122,7 +121,7 @@ export async function enviarNotaCreditoADian(notaId) {
       payment_details: [
         {
           payment_form: n.forma_pago === 'credito' ? '2' : '1',
-          payment_method_code: n.forma_pago === 'credito' ? '1' : (cfg.payment_method_code_default || '42'),
+          payment_method_code: n.forma_pago === 'credito' ? '1' : (cfg.payment_method_code_default || '10'),
           reference_code: String(n.id),
           amount: total.toFixed(2),
         },

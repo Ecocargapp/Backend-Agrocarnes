@@ -13,7 +13,7 @@
 // (mismo job de src/dian/cliente.js).
 
 import { pool } from '../db/pool.js';
-import { FactusClient, FactusError } from './factus.js';
+import { FactusClient, FactusError, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago } from './factus.js';
 
 const MAX_INTENTOS = 12;
 
@@ -28,7 +28,9 @@ async function cargarFactura(facturaId) {
     `select f.*, e.factus_config, e.nombre as empresa_nombre,
             t.id as tercero_id, t.nombre as tercero_nombre, t.tipo_documento, t.numero_documento,
             t.email as tercero_email, t.telefono as tercero_telefono, t.direccion as tercero_direccion,
-            t.ciudad_id as tercero_ciudad_id
+            t.ciudad_id as tercero_ciudad_id,
+            (select r.medio_pago from recibo_caja_aplicacion a join recibo_caja r on r.id = a.recibo_caja_id
+              where a.factura_venta_id = f.id order by r.creado_en limit 1) as medio_pago
      from factura_venta f
      join empresa e on e.id = f.empresa_id
      left join tercero t on t.id = f.cliente_id
@@ -39,7 +41,7 @@ async function cargarFactura(facturaId) {
   if (!f) throw new Error(`Factura ${facturaId} no existe`);
   const { rows: items } = await pool.query(
     `select i.cantidad, i.precio_unitario, p.id as producto_id, p.nombre as producto, p.unidad_medida,
-            p.factus_unidad_medida_code, p.factus_estandar_code, p.impuesto_pct
+            p.factus_unidad_medida_code, p.factus_estandar_code, p.impuesto_pct, p.tipo_impuesto
      from factura_venta_item i join producto p on p.id = i.producto_id
      where i.factura_venta_id = $1`,
     [facturaId]
@@ -60,8 +62,7 @@ async function marcar(facturaId, estado, extra = {}) {
 
 function clienteFactus(f, cfg) {
   if (!f.tercero_id) {
-    if (!cfg.cliente_default) throw new Error('La empresa no tiene cliente_default (consumidor final) configurado en Factus');
-    return cfg.cliente_default;
+    return cfg.cliente_default || CONSUMIDOR_FINAL;
   }
   return {
     identification_document_code: TIPO_DOCUMENTO[(f.tipo_documento || 'CC').toUpperCase()] || '13',
@@ -91,7 +92,7 @@ function armarItems(f) {
       price: (Math.round(base * 100) / 100).toFixed(2),
       unit_measure_code: unidad,
       standard_code: i.factus_estandar_code || '999',
-      taxes: pct > 0 ? [{ code: '01', rate: pct.toFixed(2) }] : [],
+      taxes: pct > 0 ? [{ code: codigoImpuesto(i.tipo_impuesto), rate: pct.toFixed(2) }] : [],
     };
   });
 }
@@ -125,7 +126,7 @@ export async function enviarFacturaADian(facturaId) {
       payment_details: [
         {
           payment_form: f.forma_pago === 'credito' ? '2' : '1',
-          payment_method_code: f.forma_pago === 'credito' ? '1' : (cfg.payment_method_code_default || '42'),
+          payment_method_code: f.forma_pago === 'credito' ? '1' : codigoMedioPago(f.medio_pago, cfg.payment_method_code_default),
           reference_code: String(f.id),
           amount: totalFactura.toFixed(2),
           due_date: f.forma_pago === 'credito' && f.fecha_vencimiento ? String(f.fecha_vencimiento).slice(0, 10) : undefined,
