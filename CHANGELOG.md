@@ -10,6 +10,15 @@ entrega del día).
 
 ---
 
+## 2026.09.30.2 — Venta interna entre centros de costo de la misma razón social
+
+- Backend (migración `007_venta_interna.sql`): `factura_venta.venta_interna`.
+  Una venta marcada como interna (ej. Carnicería → Restaurante, ambos de
+  Unión Avícola Agropollo) descuenta inventario y genera cartera como cualquier
+  venta, pero queda en `estado_dian = 'no_aplica'` y nunca se envía a la DIAN
+  (una empresa no puede facturarse electrónicamente a su propio NIT).
+- Frontend: casilla "Venta interna" en **Ventas**.
+
 ## 2026.09.30.1 — Menú del restaurante, INC y ajustes para facturar en producción con Factus
 
 - Backend (migración `006_precio_venta_y_restaurante.sql`): `producto.precio_venta`

@@ -10,6 +10,7 @@ export const router = Router();
 // body: { empresa_id, cliente_id, bodega_id, items: [{producto_id, cantidad, precio_unitario}] }
 router.post('/', async (req, res) => {
   const { empresa_id, cliente_id, bodega_id, items, forma_pago = 'contado', dias_plazo, fecha_vencimiento, medio_pago } = req.body;
+  const ventaInterna = req.body.venta_interna === true || req.body.venta_interna === 'true';
   if (!empresa_id || !bodega_id || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'Faltan empresa_id, bodega_id o items' });
   }
@@ -37,9 +38,9 @@ router.post('/', async (req, res) => {
       vencimiento = fecha_vencimiento || new Date(Date.now() + (Number(dias_plazo) || 30) * 864e5).toISOString().slice(0, 10);
     }
     const { rows: facturaRows } = await client.query(
-      `insert into factura_venta (empresa_id, cliente_id, consecutivo, total, forma_pago, fecha_vencimiento, saldo, creado_por)
-       values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
-      [empresa_id, cliente_id || null, consecutivo, total, forma_pago, vencimiento, total, req.usuario?.sub]
+      `insert into factura_venta (empresa_id, cliente_id, consecutivo, total, forma_pago, fecha_vencimiento, saldo, creado_por, venta_interna, estado_dian)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id`,
+      [empresa_id, cliente_id || null, consecutivo, total, forma_pago, vencimiento, total, req.usuario?.sub, ventaInterna, ventaInterna ? 'no_aplica' : 'pendiente']
     );
     facturaId = facturaRows[0].id;
 
@@ -89,9 +90,12 @@ router.post('/', async (req, res) => {
 
   // La venta ya quedó registrada y el cliente puede recibir su recibo YA:
   // el envío a la DIAN pasa en segundo plano y no debe bloquear la venta.
-  enviarFacturaADian(facturaId).catch((err) => {
-    console.error(`No se pudo enviar la factura ${facturaId} a la DIAN:`, err.message);
-  });
+  // Una venta interna (misma razón social) nunca va a la DIAN.
+  if (!ventaInterna) {
+    enviarFacturaADian(facturaId).catch((err) => {
+      console.error(`No se pudo enviar la factura ${facturaId} a la DIAN:`, err.message);
+    });
+  }
 
   res.status(201).json({ id: facturaId, consecutivo });
 });
@@ -102,7 +106,7 @@ router.get('/', async (req, res) => {
   let where = '';
   if (empresa_id) { params.push(empresa_id); where = 'where f.empresa_id = $1'; }
   const { rows } = await pool.query(
-    `select f.id, f.consecutivo, f.fecha, f.total, f.estado_dian, f.cufe, f.dian_mensaje, f.arco_factura_id, f.forma_pago, f.fecha_vencimiento, f.saldo, f.estado,
+    `select f.id, f.consecutivo, f.fecha, f.total, f.estado_dian, f.venta_interna, f.cufe, f.dian_mensaje, f.arco_factura_id, f.forma_pago, f.fecha_vencimiento, f.saldo, f.estado,
             e.nombre as empresa, t.nombre as cliente,
             (select count(*)::int from factura_venta_item i where i.factura_venta_id = f.id) as items
      from factura_venta f
@@ -163,6 +167,8 @@ router.get('/:id', async (req, res) => {
 // Reintenta el envío a la DIAN (o refresca el estado si ya está en Arco).
 router.post('/:id/dian', async (req, res) => {
   try {
+    const { rows } = await pool.query('select venta_interna from factura_venta where id = $1', [req.params.id]);
+    if (rows[0]?.venta_interna) return res.status(400).json({ error: 'Es una venta interna (misma razón social): no se envía a la DIAN' });
     const r = await enviarFacturaADian(req.params.id);
     res.json(r);
   } catch (err) {
