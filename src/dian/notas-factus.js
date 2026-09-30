@@ -10,7 +10,7 @@
 // (por ahora "1", sin verificar contra la tabla completa de Factus) es correcto.
 
 import { pool } from '../db/pool.js';
-import { FactusClient, FactusError, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago } from './factus.js';
+import { FactusClient, FactusError, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores } from './factus.js';
 
 const MAX_INTENTOS = 12;
 const TIPO_DOCUMENTO = { NIT: '31', CC: '13', CE: '22', TI: '12', PA: '41', PEP: '47' };
@@ -134,7 +134,7 @@ export async function enviarNotaCreditoADian(notaId) {
     const { number, cufe } = extraerNumeroYCufe(r);
     if (!number) throw new Error(`Factus no devolvió el número de la nota: ${JSON.stringify(r).slice(0, 300)}`);
 
-    const extra = { consecutivo: number, cufe: cufe || null, dian_mensaje: (r.data?.errors || []).join(' · ') || null, dian_intentos: 0 };
+    const extra = { consecutivo: number, cufe: cufe || null, dian_mensaje: textoErrores(r.data?.errors ?? r.data?.bill?.errors), dian_intentos: 0 };
     await marcar(notaId, cufe ? 'aceptada' : 'enviada', extra);
     return { estado: cufe ? 'aceptada' : 'enviada', cufe, consecutivo: number };
   } catch (err) {

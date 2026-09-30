@@ -137,3 +137,18 @@ const MEDIO_PAGO = { efectivo: '10', transferencia: '47', tarjeta: '48', tarjeta
 export function codigoMedioPago(medio, porDefecto) {
   return MEDIO_PAGO[(medio || '').toLowerCase()] || porDefecto || '10';
 }
+
+// Factus devuelve `errors` a veces como lista y a veces como objeto
+// ({ campo: [mensajes] } o { código: mensaje }); lo aplana a texto.
+export function textoErrores(errors) {
+  if (!errors) return null;
+  const partes = [];
+  const recorrer = (v) => {
+    if (v == null) return;
+    if (Array.isArray(v)) v.forEach(recorrer);
+    else if (typeof v === 'object') Object.values(v).forEach(recorrer);
+    else partes.push(String(v));
+  };
+  recorrer(errors);
+  return partes.length ? partes.join(' · ').slice(0, 2000) : null;
+}

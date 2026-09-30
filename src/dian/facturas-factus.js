@@ -13,7 +13,7 @@
 // (mismo job de src/dian/cliente.js).
 
 import { pool } from '../db/pool.js';
-import { FactusClient, FactusError, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago } from './factus.js';
+import { FactusClient, FactusError, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores } from './factus.js';
 
 const MAX_INTENTOS = 12;
 
@@ -140,7 +140,7 @@ export async function enviarFacturaADian(facturaId) {
     const { number, cufe } = extraerNumeroYCufe(r);
     if (!number) throw new Error(`Factus no devolvió el número del documento: ${JSON.stringify(r).slice(0, 300)}`);
 
-    const extra = { consecutivo: number, cufe: cufe || null, dian_mensaje: (r.data?.errors || []).join(' · ') || null, dian_intentos: 0 };
+    const extra = { consecutivo: number, cufe: cufe || null, dian_mensaje: textoErrores(r.data?.errors ?? r.data?.bill?.errors), dian_intentos: 0 };
     await marcar(facturaId, cufe ? 'aceptada' : 'enviada', extra);
     return { estado: cufe ? 'aceptada' : 'enviada', cufe, consecutivo: number };
   } catch (err) {
