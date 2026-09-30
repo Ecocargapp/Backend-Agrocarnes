@@ -4,7 +4,7 @@ import { requireRole } from '../middleware/auth.js';
 import { configPublica } from '../dian/arco.js';
 import { probarConexion } from '../dian/cliente.js';
 import { configPublica as configPublicaFactus } from '../dian/factus.js';
-import { probarConexion as probarConexionFactus } from '../dian/facturas-factus.js';
+import { probarConexion as probarConexionFactus, registrarRango } from '../dian/facturas-factus.js';
 
 export const router = Router();
 
@@ -132,6 +132,40 @@ router.delete('/:id/factus', requireRole('admin'), async (req, res) => {
 
 // Prueba credenciales (las del body, o las guardadas si no se envía password) y
 // devuelve los rangos de numeración disponibles para elegir cuál usar.
+// Registra en Factus un rango autorizado por la DIAN (prefijo + resolución)
+// y, si se pide, lo deja como rango de facturas de esta empresa.
+router.post('/:id/factus/rangos', requireRole('admin'), async (req, res) => {
+  const { rows } = await pool.query('select factus_config from empresa where id = $1', [req.params.id]);
+  const cfg = rows[0]?.factus_config;
+  if (!cfg?.client_id) return res.status(400).json({ error: 'La empresa no tiene cuenta de Factus configurada' });
+  const { prefijo, resolucion, actual, usar_para_facturas } = req.body || {};
+  if (!prefijo || !resolucion) return res.status(400).json({ error: 'Faltan prefijo o resolución' });
+  try {
+    const rango = await registrarRango(cfg, { prefijo, resolucion, actual });
+    if (usar_para_facturas && rango.id) {
+      await pool.query(
+        `update empresa set factus_config = jsonb_set(factus_config, '{numbering_range_id_factura}', to_jsonb($2::int)) where id = $1`,
+        [req.params.id, rango.id]
+      );
+    }
+    res.status(201).json({ ok: true, rango });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// Asigna a esta empresa un rango que ya existe en Factus (por su id).
+router.put('/:id/factus/rango-factura', requireRole('admin'), async (req, res) => {
+  const id = Number(req.body?.rango_id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'rango_id inválido' });
+  const { rowCount } = await pool.query(
+    `update empresa set factus_config = jsonb_set(factus_config, '{numbering_range_id_factura}', to_jsonb($2::int))
+     where id = $1 and factus_config is not null`, [req.params.id, id]
+  );
+  if (!rowCount) return res.status(404).json({ error: 'Empresa sin cuenta de Factus' });
+  res.json({ ok: true });
+});
+
 router.post('/:id/factus/probar', requireRole('admin'), async (req, res) => {
   const { rows } = await pool.query('select factus_config from empresa where id = $1', [req.params.id]);
   const guardada = rows[0]?.factus_config || {};

@@ -175,8 +175,35 @@ export async function probarConexion(cfg) {
   await factus.login();
   const rangos = await factus.get('v2/numbering-ranges');
   const lista = rangos?.data?.data || rangos?.data || [];
+  // Rangos que la DIAN tiene asociados al software de Factus (aún no
+  // registrados en Factus si no aparecen en la lista anterior).
+  let dian = [];
+  try {
+    const r = await factus.get('v2/numbering-ranges/dian');
+    dian = (r?.data?.data || r?.data || []).map((x) => ({
+      prefijo: x.prefix, desde: x.from, hasta: x.to, resolucion: x.resolution_number,
+      inicio: x.start_date, fin: x.end_date, tiene_clave_tecnica: Boolean(x.technical_key),
+    }));
+  } catch (err) {
+    dian = { error: err.message };
+  }
   return {
     ok: true,
-    rangos_numeracion: lista.map((r) => ({ id: r.id, documento: r.document, prefijo: r.prefix, activo: r.is_active })),
+    rangos_numeracion: lista.map((r) => ({ id: r.id, documento: r.document, prefijo: r.prefix, desde: r.from, hasta: r.to, actual: r.current, resolucion: r.resolution_number, activo: r.is_active })),
+    rangos_dian: dian,
   };
+}
+
+// Registra en Factus un rango ya autorizado por la DIAN y asociado a su
+// software (Factus completa fechas y clave técnica desde la DIAN).
+export async function registrarRango(cfg, { prefijo, resolucion, actual, documento = '21' }) {
+  const factus = new FactusClient(cfg);
+  const r = await factus.post('v2/numbering-ranges', {
+    document: String(documento),
+    prefix: String(prefijo).trim(),
+    resolution_number: String(resolucion).trim(),
+    current: Number(actual) || 1,
+  });
+  const d = r?.data || {};
+  return { id: d.id, prefijo: d.prefix, desde: d.from, hasta: d.to, actual: d.current, resolucion: d.resolution_number };
 }
