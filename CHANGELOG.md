@@ -10,6 +10,24 @@ entrega del día).
 
 ---
 
+## 2026.10.02.1 — Terceros con los campos de la plantilla contable
+
+- Backend (migración `008_terceros_completos.sql`): el tercero ahora tiene
+  los 28 campos de la plantilla de importación de terceros
+  (Template-7580.xlsx): tipo de persona, nombres y apellidos o razón social,
+  nombre comercial, dirección, ciudad DANE, teléfono, correo, autorretenedor,
+  regímenes de renta/IVA/ICA, límites de retención, tarifa de rete IVA,
+  cuenta bancaria, id exterior, estado y código de país. `POST /terceros`
+  valida con las reglas de la plantilla (natural: primer nombre y apellido;
+  jurídica: razón social; dirección ≥ 8 caracteres; ciudad de 5 dígitos;
+  teléfono; regímenes según el tipo de persona; documento sin DV y sin
+  repetir). Nuevo `PUT /terceros/:id`.
+- Factus: el adquiriente usa el tipo de persona, nombre comercial y régimen
+  de IVA del tercero; más tipos de documento (RC, TE, DE, exógena).
+- Frontend: formulario único de tercero en **Ventas** (clientes) y
+  **Compras** (proveedores), con la sección tributaria y bancaria plegable,
+  y botón para descargar todos los terceros en el formato de la plantilla.
+
 ## 2026.09.30.2 — Venta interna entre centros de costo de la misma razón social
 
 - Backend (migración `007_venta_interna.sql`): `factura_venta.venta_interna`.

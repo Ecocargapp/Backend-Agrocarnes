@@ -13,7 +13,7 @@ import { pool } from '../db/pool.js';
 import { FactusClient, FactusError, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores } from './factus.js';
 
 const MAX_INTENTOS = 12;
-const TIPO_DOCUMENTO = { NIT: '31', CC: '13', CE: '22', TI: '12', PA: '41', PEP: '47' };
+const TIPO_DOCUMENTO = { CC: '13', NIT: '31', RC: '11', TI: '12', TE: '21', CE: '22', PA: '41', DE: '42', PEP: '47', EX: '43' };
 const UNIDAD_MEDIDA = { kg: 'KGM', g: 'GRM', gr: 'GRM', l: 'LTR', lt: 'LTR', litro: 'LTR', lb: 'LBR', un: '94', unidad: '94' };
 
 async function cargarNota(notaId) {
@@ -22,7 +22,7 @@ async function cargarNota(notaId) {
             e.factus_config, e.nombre as empresa_nombre,
             t.id as tercero_id, t.nombre as tercero_nombre, t.tipo_documento, t.numero_documento,
             t.email as tercero_email, t.telefono as tercero_telefono, t.direccion as tercero_direccion,
-            t.ciudad_id as tercero_ciudad_id
+            t.ciudad_id as tercero_ciudad_id, t.tipo_persona as tercero_tipo_persona, t.nombre_comercial as tercero_nombre_comercial, t.regimen_iva as tercero_regimen_iva
      from nota_credito n
      join factura_venta f on f.id = n.factura_venta_id
      join empresa e on e.id = n.empresa_id
@@ -64,8 +64,9 @@ function clienteFactus(n, cfg) {
     address: n.tercero_direccion || 'No registra',
     email: n.tercero_email || undefined,
     phone: n.tercero_telefono || undefined,
-    legal_organization_code: (n.tipo_documento || '').toUpperCase() === 'NIT' ? '1' : '2',
-    tribute_code: 'ZZ',
+    legal_organization_code: n.tercero_tipo_persona === 'juridica' || (n.tipo_documento || '').toUpperCase() === 'NIT' ? '1' : '2',
+    trade_name: n.tercero_nombre_comercial || undefined,
+    tribute_code: n.tercero_regimen_iva === '3' ? '01' : 'ZZ',
     country_code: 'CO',
     municipality_code: n.tercero_ciudad_id || cfg.municipality_code_default || '05001',
   };

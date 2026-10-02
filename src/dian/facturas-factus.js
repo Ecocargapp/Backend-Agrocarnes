@@ -18,7 +18,7 @@ import { FactusClient, FactusError, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedi
 const MAX_INTENTOS = 12;
 
 // Mismos códigos DIAN que usa Arco (identification_document_code de Factus).
-const TIPO_DOCUMENTO = { NIT: '31', CC: '13', CE: '22', TI: '12', PA: '41', PEP: '47' };
+const TIPO_DOCUMENTO = { CC: '13', NIT: '31', RC: '11', TI: '12', TE: '21', CE: '22', PA: '41', DE: '42', PEP: '47', EX: '43' };
 
 // Códigos de unidad UN/CEFACT más comunes; "94" (unidad) es un valor seguro por defecto.
 const UNIDAD_MEDIDA = { kg: 'KGM', g: 'GRM', gr: 'GRM', l: 'LTR', lt: 'LTR', litro: 'LTR', lb: 'LBR', un: '94', unidad: '94' };
@@ -28,7 +28,7 @@ async function cargarFactura(facturaId) {
     `select f.*, e.factus_config, e.nombre as empresa_nombre,
             t.id as tercero_id, t.nombre as tercero_nombre, t.tipo_documento, t.numero_documento,
             t.email as tercero_email, t.telefono as tercero_telefono, t.direccion as tercero_direccion,
-            t.ciudad_id as tercero_ciudad_id,
+            t.ciudad_id as tercero_ciudad_id, t.tipo_persona as tercero_tipo_persona, t.nombre_comercial as tercero_nombre_comercial, t.regimen_iva as tercero_regimen_iva,
             (select r.medio_pago from recibo_caja_aplicacion a join recibo_caja r on r.id = a.recibo_caja_id
               where a.factura_venta_id = f.id order by r.creado_en limit 1) as medio_pago
      from factura_venta f
@@ -71,8 +71,9 @@ function clienteFactus(f, cfg) {
     address: f.tercero_direccion || 'No registra',
     email: f.tercero_email || undefined,
     phone: f.tercero_telefono || undefined,
-    legal_organization_code: (f.tipo_documento || '').toUpperCase() === 'NIT' ? '1' : '2',
-    tribute_code: 'ZZ',
+    legal_organization_code: f.tercero_tipo_persona === 'juridica' || (f.tipo_documento || '').toUpperCase() === 'NIT' ? '1' : '2',
+    trade_name: f.tercero_nombre_comercial || undefined,
+    tribute_code: f.tercero_regimen_iva === '3' ? '01' : 'ZZ',
     country_code: 'CO',
     municipality_code: f.tercero_ciudad_id || cfg.municipality_code_default || '05001',
   };
