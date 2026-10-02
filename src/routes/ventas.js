@@ -157,7 +157,7 @@ router.get('/:id', async (req, res) => {
   );
   if (!rows[0]) return res.status(404).json({ error: 'Factura no encontrada' });
   const { rows: items } = await pool.query(
-    `select i.producto_id, i.cantidad, i.precio_unitario, p.nombre as producto, p.unidad_medida
+    `select i.producto_id, i.cantidad, i.precio_unitario, coalesce(p.codigo || ' · ', '') || p.nombre as producto, p.unidad_medida
      from factura_venta_item i join producto p on p.id = i.producto_id
      where i.factura_venta_id = $1 order by p.nombre`,
     [req.params.id]

@@ -8,7 +8,7 @@ router.get('/existencias', async (req, res) => {
   const { bodega_id } = req.query;
   const params = [];
   let sql = `
-    select e.bodega_id, e.producto_id, p.nombre as producto, p.unidad_medida,
+    select e.bodega_id, e.producto_id, p.codigo, coalesce(p.codigo || ' · ', '') || p.nombre as producto, p.unidad_medida,
            e.cantidad, e.costo_promedio, e.actualizado_en
     from existencia e
     join producto p on p.id = e.producto_id
@@ -17,7 +17,7 @@ router.get('/existencias', async (req, res) => {
     params.push(bodega_id);
     sql += ' where e.bodega_id = $1';
   }
-  sql += ' order by p.nombre';
+  sql += ' order by p.codigo nulls last, p.nombre';
   const { rows } = await pool.query(sql, params);
   res.json(rows);
 });

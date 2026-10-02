@@ -160,7 +160,7 @@ router.get('/:id', async (req, res) => {
   );
   if (!rows[0]) return res.status(404).json({ error: 'Nota crédito no encontrada' });
   const { rows: items } = await pool.query(
-    `select i.cantidad, i.precio_unitario, p.nombre as producto, p.unidad_medida from nota_credito_item i join producto p on p.id = i.producto_id where i.nota_credito_id = $1`,
+    `select i.cantidad, i.precio_unitario, coalesce(p.codigo || ' · ', '') || p.nombre as producto, p.unidad_medida from nota_credito_item i join producto p on p.id = i.producto_id where i.nota_credito_id = $1`,
     [req.params.id]
   );
   res.json({ ...rows[0], razon_texto: RAZONES[rows[0].razon], items });

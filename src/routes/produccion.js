@@ -70,7 +70,7 @@ router.post('/', async (req, res) => {
 
 router.get('/', async (_req, res) => {
   const { rows } = await pool.query(`
-    select o.id, o.creado_en, p.nombre as producto, p.unidad_medida, o.cantidad_producida,
+    select o.id, o.creado_en, coalesce(p.codigo || ' · ', '') || p.nombre as producto, p.unidad_medida, o.cantidad_producida,
            o.costo_unitario, b.nombre as bodega, e.nombre as empresa
     from orden_produccion o
     join producto p on p.id = o.producto_terminado_id

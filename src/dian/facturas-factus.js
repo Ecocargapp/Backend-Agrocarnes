@@ -41,7 +41,7 @@ async function cargarFactura(facturaId) {
   if (!f) throw new Error(`Factura ${facturaId} no existe`);
   const { rows: items } = await pool.query(
     `select i.cantidad, i.precio_unitario, p.id as producto_id, p.nombre as producto, p.unidad_medida,
-            p.factus_unidad_medida_code, p.factus_estandar_code, p.impuesto_pct, p.tipo_impuesto
+            p.factus_unidad_medida_code, p.factus_estandar_code, p.impuesto_pct, p.tipo_impuesto, p.codigo
      from factura_venta_item i join producto p on p.id = i.producto_id
      where i.factura_venta_id = $1`,
     [facturaId]
@@ -86,7 +86,7 @@ function armarItems(f) {
     const base = pct > 0 ? precio / (1 + pct / 100) : precio;
     const unidad = i.factus_unidad_medida_code || UNIDAD_MEDIDA[(i.unidad_medida || '').toLowerCase()] || '94';
     return {
-      code_reference: i.producto_id,
+      code_reference: i.codigo || i.producto_id,
       name: i.producto,
       quantity: String(Number(i.cantidad).toFixed(2)),
       discount_rate: '0.00',

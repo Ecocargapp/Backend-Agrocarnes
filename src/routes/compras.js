@@ -88,7 +88,7 @@ router.get('/', async (req, res) => {
 
 router.get('/:id', async (req, res) => {
   const { rows } = await pool.query(
-    `select i.cantidad, i.costo_unitario, p.nombre as producto, p.unidad_medida, b.nombre as bodega
+    `select i.cantidad, i.costo_unitario, coalesce(p.codigo || ' · ', '') || p.nombre as producto, p.unidad_medida, b.nombre as bodega
      from compra_item i join producto p on p.id = i.producto_id join bodega b on b.id = i.bodega_id
      where i.compra_id = $1 order by p.nombre`,
     [req.params.id]
