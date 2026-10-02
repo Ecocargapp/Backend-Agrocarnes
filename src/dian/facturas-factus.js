@@ -208,3 +208,17 @@ export async function registrarRango(cfg, { prefijo, resolucion, actual, documen
   const d = r?.data || {};
   return { id: d.id, prefijo: d.prefix, desde: d.from, hasta: d.to, actual: d.current, resolucion: d.resolution_number };
 }
+
+// Descarga de Factus la representación gráfica (PDF) de una factura ya
+// validada. Devuelve { nombre, buffer }.
+export async function descargarPdf(facturaId) {
+  const f = await cargarFactura(facturaId);
+  if (!f.factus_config?.client_id) throw new Error(`${f.empresa_nombre} no tiene cuenta de Factus`);
+  if (!f.cufe || !f.consecutivo) throw new Error('La factura todavía no ha sido aceptada por la DIAN; no hay PDF');
+  const factus = new FactusClient(f.factus_config);
+  const r = await factus.get(`v2/bills/${encodeURIComponent(f.consecutivo)}/download-pdf`);
+  const d = r?.data || {};
+  const b64 = d.pdf_base_64_encoded || d.pdf_base64 || d.file;
+  if (!b64) throw new Error('Factus no devolvió el PDF');
+  return { nombre: `${d.file_name || f.consecutivo}.pdf`.replace(/\.pdf\.pdf$/, '.pdf'), buffer: Buffer.from(b64, 'base64') };
+}

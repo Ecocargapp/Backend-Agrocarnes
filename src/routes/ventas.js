@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { registrarMovimiento } from '../db/inventario.js';
 import { emitidaElectronicamente } from './notas-credito.js';
+import { descargarPdf } from '../dian/facturas-factus.js';
 import { enviarFacturaADian, sincronizarEstado } from '../dian/cliente.js';
 
 export const router = Router();
@@ -171,6 +172,22 @@ router.post('/:id/dian', async (req, res) => {
     if (rows[0]?.venta_interna) return res.status(400).json({ error: 'Es una venta interna (misma razón social): no se envía a la DIAN' });
     const r = await enviarFacturaADian(req.params.id);
     res.json(r);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// PDF de la factura electrónica (representación gráfica) para imprimir.
+router.get('/:id/pdf', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `select e.proveedor_dian from factura_venta f join empresa e on e.id = f.empresa_id where f.id = $1`, [req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Factura no encontrada' });
+    if (rows[0].proveedor_dian !== 'factus') return res.status(400).json({ error: 'El PDF solo está disponible para facturas emitidas con Factus' });
+    const { nombre, buffer } = await descargarPdf(req.params.id);
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${nombre.replace(/"/g, '')}"` });
+    res.send(buffer);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
