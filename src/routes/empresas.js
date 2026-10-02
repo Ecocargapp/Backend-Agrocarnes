@@ -3,7 +3,7 @@ import { pool } from '../db/pool.js';
 import { requireRole } from '../middleware/auth.js';
 import { configPublica } from '../dian/arco.js';
 import { probarConexion } from '../dian/cliente.js';
-import { configPublica as configPublicaFactus } from '../dian/factus.js';
+import { configPublica as configPublicaFactus, FactusClient } from '../dian/factus.js';
 import { probarConexion as probarConexionFactus, registrarRango } from '../dian/facturas-factus.js';
 
 export const router = Router();
@@ -164,6 +164,24 @@ router.put('/:id/factus/rango-factura', requireRole('admin'), async (req, res) =
   );
   if (!rowCount) return res.status(404).json({ error: 'Empresa sin cuenta de Factus' });
   res.json({ ok: true });
+});
+
+// Logo de la empresa en Factus (sale en el PDF de las facturas).
+// body: { imagen_base64, nombre } — la imagen ya redimensionada (≤300x300, <200 KB).
+router.post('/:id/factus/logo', requireRole('admin'), async (req, res) => {
+  const { rows } = await pool.query('select factus_config from empresa where id = $1', [req.params.id]);
+  const cfg = rows[0]?.factus_config;
+  if (!cfg?.client_id) return res.status(400).json({ error: 'La empresa no tiene cuenta de Factus configurada' });
+  const { imagen_base64, nombre = 'logo.png' } = req.body || {};
+  if (!imagen_base64) return res.status(400).json({ error: 'Falta la imagen' });
+  const buffer = Buffer.from(String(imagen_base64).replace(/^data:[^,]+,/, ''), 'base64');
+  if (buffer.length >= 200 * 1024) return res.status(400).json({ error: 'El logo debe pesar menos de 200 KB' });
+  try {
+    const r = await new FactusClient(cfg).subirLogo(buffer, nombre);
+    res.json({ ok: true, respuesta: r?.message || r?.status || 'Logo actualizado' });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
 });
 
 router.post('/:id/factus/probar', requireRole('admin'), async (req, res) => {

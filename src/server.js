@@ -24,7 +24,7 @@ const corsOrigin = process.env.CORS_ORIGIN;
 app.use(cors({
   origin: !corsOrigin || corsOrigin === '*' ? true : corsOrigin.split(',').map((o) => o.trim()),
 }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' })); // el logo de Factus llega en base64 (hasta ~270 KB)
 
 app.get('/health', (_req, res) => res.json({ ok: true, servicio: 'agrocarnes-api' }));
 

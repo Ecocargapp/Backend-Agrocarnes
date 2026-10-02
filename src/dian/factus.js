@@ -105,6 +105,27 @@ export class FactusClient {
     return data;
   }
 
+  // Sube el logo de la empresa (sale en el PDF de las facturas).
+  // Factus: PNG/JPG, máx. 300x300 px y menos de 200 KB, campo "image".
+  async subirLogo(buffer, nombre = 'logo.png', reintentar = true) {
+    const token = await this.token();
+    const tipo = /\.jpe?g$/i.test(nombre) ? 'image/jpeg' : 'image/png';
+    const form = new FormData();
+    form.append('image', new Blob([buffer], { type: tipo }), nombre);
+    const res = await fetch(this.base + 'v2/companies/logo', {
+      method: 'POST', headers: { Accept: 'application/json', Authorization: `Bearer ${token}` }, body: form,
+    });
+    if (res.status === 401 && reintentar) {
+      tokens.delete(this.key);
+      return this.subirLogo(buffer, nombre, false);
+    }
+    const text = await res.text();
+    let data;
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+    if (!res.ok) throw new FactusError(`Factus rechazó el logo (${res.status}): ${JSON.stringify(data).slice(0, 400)}`, { status: res.status, body: data, endpoint: 'v2/companies/logo' });
+    return data;
+  }
+
   get(endpoint) { return this.request('GET', endpoint); }
   post(endpoint, body) { return this.request('POST', endpoint, body); }
   delete(endpoint) { return this.request('DELETE', endpoint); }
