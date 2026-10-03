@@ -3,6 +3,7 @@ import { pool } from '../db/pool.js';
 import { registrarMovimiento } from '../db/inventario.js';
 import { emitidaElectronicamente } from './notas-credito.js';
 import { descargarPdf } from '../dian/facturas-factus.js';
+import { contabilizar } from '../contabilidad/contabilizar.js';
 import { enviarFacturaADian, sincronizarEstado } from '../dian/cliente.js';
 
 export const router = Router();
@@ -21,6 +22,7 @@ router.post('/', async (req, res) => {
   const client = await pool.connect();
   let facturaId;
   let consecutivo;
+  let reciboId = null;
   try {
     await client.query('begin');
 
@@ -53,6 +55,7 @@ router.post('/', async (req, res) => {
          values ($1, $2, $3, $4, $5, $6, $7) returning id`,
         [empresa_id, cliente_id || null, emp[0].ultimo_recibo, medio_pago || 'efectivo', total, `Venta de contado ${consecutivo}`, req.usuario?.sub]
       );
+      reciboId = rec[0].id;
       await client.query('insert into recibo_caja_aplicacion (recibo_caja_id, factura_venta_id, valor) values ($1, $2, $3)', [rec[0].id, facturaId, total]);
       await client.query('update factura_venta set saldo = 0 where id = $1', [facturaId]);
     }
@@ -88,6 +91,9 @@ router.post('/', async (req, res) => {
   } finally {
     client.release();
   }
+
+  await contabilizar('factura_venta', facturaId);
+  if (reciboId) await contabilizar('recibo_caja', reciboId);
 
   // La venta ya quedó registrada y el cliente puede recibir su recibo YA:
   // el envío a la DIAN pasa en segundo plano y no debe bloquear la venta.
@@ -237,6 +243,9 @@ router.post('/:id/anular', async (req, res) => {
       [f.id, req.usuario?.sub, motivo]
     );
     await client.query('commit');
+    await contabilizar('factura_venta', f.id);
+    const { rows: recs } = await pool.query('select distinct recibo_caja_id as id from recibo_caja_aplicacion where factura_venta_id = $1', [f.id]);
+    for (const r of recs) await contabilizar('recibo_caja', r.id);
     res.json({ ok: true, estado: 'anulada' });
   } catch (err) {
     await client.query('rollback');

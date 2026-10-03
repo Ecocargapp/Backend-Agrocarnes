@@ -18,6 +18,8 @@ import { router as tercerosRouter } from './routes/terceros.js';
 import { router as recetasRouter } from './routes/recetas.js';
 import { router as carteraRouter } from './routes/cartera.js';
 import { router as notasCreditoRouter } from './routes/notas-credito.js';
+import { router as gastosRouter } from './routes/gastos.js';
+import { router as informesRouter } from './routes/informes.js';
 
 const app = express();
 const corsOrigin = process.env.CORS_ORIGIN;
@@ -43,6 +45,8 @@ app.use('/terceros', requireAuth, tercerosRouter);
 app.use('/recetas', requireAuth, recetasRouter);
 app.use('/cartera', requireAuth, carteraRouter);
 app.use('/notas-credito', requireAuth, notasCreditoRouter);
+app.use('/gastos', requireAuth, gastosRouter);
+app.use('/informes', requireAuth, informesRouter);
 
 app.use((err, _req, res, _next) => {
   console.error(err);

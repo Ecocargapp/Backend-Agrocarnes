@@ -14,6 +14,7 @@
 
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
+import { contabilizar } from '../contabilidad/contabilizar.js';
 
 export const router = Router();
 
@@ -85,9 +86,14 @@ router.get('/clientes/:terceroId/documentos', async (req, res) => {
   res.json(rows);
 });
 
-// body: { empresa_id, tercero_id, fecha, medio_pago, notas, aplicaciones: [{ factura_venta_id, valor }] }
+// body: { empresa_id, tercero_id, fecha, medio_pago, notas, aplicaciones: [{ factura_venta_id, valor }],
+//         retefuente, reteiva, reteica }  ← retenciones que el CLIENTE nos practicó al pagar
+// Las aplicaciones bajan el saldo de las facturas por su valor completo; el
+// dinero que entra es ese valor menos las retenciones.
 router.post('/recibos', async (req, res) => {
   const { empresa_id, tercero_id, fecha, medio_pago, notas, aplicaciones } = req.body;
+  const ret = ['retefuente', 'reteiva', 'reteica'].map((k) => Math.round(Number(req.body[k] || 0) * 100) / 100);
+  if (ret.some((v) => v < 0)) return res.status(400).json({ error: 'Las retenciones no pueden ser negativas' });
   if (!empresa_id || !Array.isArray(aplicaciones) || aplicaciones.length === 0) {
     return res.status(400).json({ error: 'Faltan empresa_id o aplicaciones' });
   }
@@ -109,13 +115,14 @@ router.post('/recibos', async (req, res) => {
       if (valor > Number(f.saldo) + 0.005) throw new Error(`El valor supera el saldo de la factura ${f.consecutivo} (${f.saldo})`);
       total += valor;
     }
+    if (ret[0] + ret[1] + ret[2] > total) throw new Error('Las retenciones no pueden superar el valor aplicado a las facturas');
     const { rows: emp } = await client.query(
       'update empresa set ultimo_recibo = ultimo_recibo + 1 where id = $1 returning ultimo_recibo', [empresa_id]
     );
     const { rows: rec } = await client.query(
-      `insert into recibo_caja (empresa_id, tercero_id, consecutivo, fecha, medio_pago, total, notas, creado_por)
-       values ($1, $2, $3, coalesce($4, current_date), $5, $6, $7, $8) returning id, consecutivo`,
-      [empresa_id, tercero_id || null, emp[0].ultimo_recibo, fecha || null, medio_pago || 'efectivo', total, notas || null, req.usuario?.sub]
+      `insert into recibo_caja (empresa_id, tercero_id, consecutivo, fecha, medio_pago, total, notas, creado_por, retefuente, reteiva, reteica)
+       values ($1, $2, $3, coalesce($4, current_date), $5, $6, $7, $8, $9, $10, $11) returning id, consecutivo`,
+      [empresa_id, tercero_id || null, emp[0].ultimo_recibo, fecha || null, medio_pago || 'efectivo', total, notas || null, req.usuario?.sub, ...ret]
     );
     for (const a of aplicaciones) {
       await client.query(
@@ -125,7 +132,8 @@ router.post('/recibos', async (req, res) => {
       await client.query('update factura_venta set saldo = round(saldo - $1, 2) where id = $2', [Number(a.valor), a.factura_venta_id]);
     }
     await client.query('commit');
-    res.status(201).json({ id: rec[0].id, consecutivo: rec[0].consecutivo, total });
+    await contabilizar('recibo_caja', rec[0].id);
+    res.status(201).json({ id: rec[0].id, consecutivo: rec[0].consecutivo, total, recibido: Math.round((total - ret[0] - ret[1] - ret[2]) * 100) / 100 });
   } catch (err) {
     await client.query('rollback');
     res.status(400).json({ error: err.message });
@@ -176,7 +184,7 @@ router.get('/proveedores/documentos', async (req, res) => {
   let where = 'where c.saldo > 0';
   if (empresa_id) { params.push(empresa_id); where += ` and c.empresa_id = $${params.length}`; }
   const { rows } = await pool.query(
-    `select c.id, c.numero_factura_proveedor, c.fecha, c.fecha_vencimiento, c.total, c.saldo, c.forma_pago, e.nombre as empresa,
+    `select c.id, c.clase, c.descripcion, c.numero_factura_proveedor, c.fecha, c.fecha_vencimiento, c.total, c.saldo, c.forma_pago, e.nombre as empresa,
             t.nombre as proveedor, t.numero_documento,
             greatest(0, current_date - c.fecha_vencimiento) as dias_vencido
      from compra c join empresa e on e.id = c.empresa_id join tercero t on t.id = c.proveedor_id
@@ -193,7 +201,7 @@ router.get('/proveedores/:terceroId/documentos', async (req, res) => {
   let where = 'where c.proveedor_id = $1';
   if (empresa_id) { params.push(empresa_id); where += ` and c.empresa_id = $${params.length}`; }
   const { rows } = await pool.query(
-    `select c.id, c.numero_factura_proveedor, c.fecha, c.fecha_vencimiento, c.total, c.saldo, c.forma_pago, e.nombre as empresa,
+    `select c.id, c.clase, c.descripcion, c.numero_factura_proveedor, c.fecha, c.fecha_vencimiento, c.total, c.saldo, c.forma_pago, e.nombre as empresa,
             greatest(0, current_date - c.fecha_vencimiento) as dias_vencido
      from compra c join empresa e on e.id = c.empresa_id
      ${where}
@@ -236,6 +244,7 @@ router.post('/pagos', async (req, res) => {
       await client.query('update compra set saldo = round(saldo - $1, 2) where id = $2', [Number(a.valor), a.compra_id]);
     }
     await client.query('commit');
+    await contabilizar('pago_proveedor', pago[0].id);
     res.status(201).json({ id: pago[0].id, consecutivo: pago[0].consecutivo, total });
   } catch (err) {
     await client.query('rollback');

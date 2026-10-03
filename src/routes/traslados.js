@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { registrarMovimiento } from '../db/inventario.js';
+import { contabilizar } from '../contabilidad/contabilizar.js';
 
 export const router = Router();
 
@@ -49,6 +50,7 @@ router.post('/', async (req, res) => {
     });
 
     await client.query('commit');
+    await contabilizar('traslado', trasladoId);
     res.status(201).json({ id: trasladoId, costo_unitario: costoUnitario });
   } catch (err) {
     await client.query('rollback');

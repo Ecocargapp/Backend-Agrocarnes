@@ -10,6 +10,32 @@ entrega del día).
 
 ---
 
+## 2026.10.02.2 — Contabilidad automática (PUC), módulo de Gastos e Informes
+
+- **Contabilidad automática** (migración `010_contabilidad.sql`,
+  `src/contabilidad/`): plan de cuentas PUC, asientos generados desde cada
+  documento (venta, nota crédito, compra, gasto, recibo, pago, traslado entre
+  centros de costo, depreciación mensual). Se pueden reconstruir completos
+  (`POST /informes/reconstruir`); los asientos manuales (aportes de capital)
+  se conservan. Verificado: activo = pasivo + patrimonio por empresa y
+  consolidado.
+- **Gastos** (`/gastos`): separados de las compras de inventario; por
+  categoría (nómina, honorarios, arriendo, servicios, publicidad, financieros…)
+  con su cuenta 51/52/53, y **activos fijos** (cuentas 15xx) con depreciación
+  en línea recta según la vida útil fiscal (construcciones 45 años, maquinaria
+  y muebles 10, vehículos 10, cómputo 5). Entran a cuentas por pagar y a los
+  pagos a proveedores.
+- **IVA y retenciones**: compras y gastos con IVA por línea y retenciones
+  automáticas por concepto (tabla del Decreto 572 de 2025, vigente desde el
+  1/07/2026, UVT 2026 = $52.374), corregibles a mano; no se retiene a
+  autorretenedores ni al régimen simple. Los recibos de caja registran las
+  retenciones que nos practican los clientes (anticipo de impuestos).
+- **Informes** (`/informes`): venta diaria, estado de resultados (utilidad
+  bruta, EBITDA, utilidad operacional, utilidad antes de impuestos), balance
+  general, IVA e INC a pagar, retenciones a pagar (formulario 350) frente a las
+  que nos practicaron, libro diario exportable a Excel; por empresa o
+  consolidado. Aportes de capital desde la misma pantalla.
+
 ## 2026.10.02.1 — Terceros con los campos de la plantilla contable
 
 - Backend (migración `008_terceros_completos.sql`): el tercero ahora tiene

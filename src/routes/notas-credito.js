@@ -16,6 +16,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { registrarMovimiento } from '../db/inventario.js';
+import { contabilizar } from '../contabilidad/contabilizar.js';
 import { enviarNotaCreditoADian, sincronizarNotaCredito } from '../dian/notas.js';
 
 export const router = Router();
@@ -122,6 +123,7 @@ router.post('/', async (req, res) => {
       );
     }
     await client.query('commit');
+    await contabilizar('nota_credito', notaId);
 
     if (emitidaElectronicamente(f)) {
       enviarNotaCreditoADian(notaId).catch((err) => console.error(`NC ${notaId} a la DIAN:`, err.message));
