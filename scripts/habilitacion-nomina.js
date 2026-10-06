@@ -6,6 +6,7 @@
 //   node scripts/habilitacion-nomina.js "Agrocarnes" --solo=3,5  → solo esos casos
 //   node scripts/habilitacion-nomina.js "Agrocarnes" --ajuste=NEF12  → nota de ajuste (fase 2)
 //   node scripts/habilitacion-nomina.js "Agrocarnes" --rango=ID  → rango de nómina si hay varios activos
+//   node scripts/habilitacion-nomina.js "Agrocarnes" --solo=6 --referencia=HAB-X-06 → reenvía una pendiente con su misma referencia
 //   node scripts/habilitacion-nomina.js "Agrocarnes" --ver       → muestra el JSON del caso 1 sin enviar
 //
 // El resultado queda en scripts/habilitacion-nomina-resultado.json.
@@ -58,7 +59,7 @@ for (const c of CASOS_PRUEBA.filter((x) => !solo || solo.includes(x.n))) {
   const periodo = c.quincena ? '4' : '5';
   const L = liquidar({ empleado: e, anio: c.anio, mes: c.mes, periodo, quincena: c.quincena || null, novedades: c.novedades || {} });
   const n = {
-    id: `${sello}-${String(c.n).padStart(2, '0')}`, referencia_envio: `HAB-${sello}-${String(c.n).padStart(2, '0')}`, anio: c.anio, mes: c.mes,
+    id: `${sello}-${String(c.n).padStart(2, '0')}`, referencia_envio: opcion('referencia') || `HAB-${sello}-${String(c.n).padStart(2, '0')}`, anio: c.anio, mes: c.mes,
     periodo, quincena: c.quincena || null, fecha_pago: c.pago, medio_pago: e.medio_pago, observacion: `Prueba ${c.n}: ${c.titulo}`,
     empleado_snapshot: e, liquidacion: L,
   };
