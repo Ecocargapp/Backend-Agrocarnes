@@ -104,7 +104,7 @@ export function armarNomina(n, cfg = {}) {
     numbering_range_id: cfg.numbering_range_id_nomina || undefined,
     settlement_period: {
       month: String(n.mes), year: String(n.anio), payroll_period_code: String(n.periodo),
-      pay_period_half: String(n.periodo) === '4' ? (n.quincena || '1st') : undefined,
+      pay_period_half: String(n.periodo) === '4' ? (n.quincena === '2nd' ? 2 : 1) : undefined, // Factus exige entero (1 o 2), no '1st'/'2nd'
     },
     payment: {
       payment_method_code: medio,
