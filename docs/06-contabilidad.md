@@ -65,6 +65,26 @@ operacional, no operacionales, utilidad antes de impuestos) · Balance general
 Retenciones a pagar (formulario 350) · Libro diario (Excel para el contador).
 Por empresa (centro de costo) o consolidado.
 
+## Anulaciones
+
+Todo documento contable (factura, compra, gasto, recibo de caja, comprobante
+de egreso, traslado, orden de producción) tiene un botón **Anular** visible
+solo para administradores. Pide doble confirmación: primero muestra qué va a
+pasar y exige el motivo; luego hay que escribir ANULAR.
+
+- El documento no se borra: queda con `estado = 'anulado'`, motivo, fecha y
+  usuario, y se registra en la tabla `anulacion`.
+- El inventario se reversa con movimientos `anulacion_entrada` /
+  `anulacion_salida`; si la mercancía ya salió (vendida o trasladada), la
+  anulación se bloquea con una explicación.
+- El asiento del documento se elimina (y la reconstrucción de la contabilidad
+  ignora los anulados); los saldos de cartera se restablecen.
+- Egreso o recibo exclusivo de un documento de contado → se anula en cascada.
+  Si cubre varios documentos, hay que anularlo primero desde Cartera.
+- Gasto con activo fijo → el activo se da de baja y se borran sus depreciaciones.
+- Factura ya enviada a la DIAN → no se puede anular localmente: el botón emite
+  una nota crédito de anulación (razón 2) por el total.
+
 ## Pendientes conocidos
 
 - Platos del restaurante (sin inventario): no generan costo de ventas; la

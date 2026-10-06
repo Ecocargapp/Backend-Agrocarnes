@@ -151,6 +151,7 @@ export async function contabilizarCompra(client, id) {
   const { rows } = await client.query('select * from compra where id = $1', [id]);
   const c = rows[0];
   if (!c) return;
+  if (c.estado === 'anulado') return borrar(client, 'compra', id);
   const lineas = [];
   const esGasto = c.clase === 'gasto';
   if (esGasto) {
@@ -193,6 +194,7 @@ export async function contabilizarRecibo(client, id) {
   const { rows } = await client.query('select * from recibo_caja where id = $1', [id]);
   const r = rows[0];
   if (!r) return;
+  if (r.estado === 'anulado') return borrar(client, 'recibo_caja', id);
   const cuentaR = await cuentaDe(client, r.cuenta_pago_id, r.medio_pago);
   // Lo aplicado a facturas anuladas se considera dinero devuelto: no se contabiliza.
   const { rows: ap } = await client.query(
@@ -219,6 +221,7 @@ export async function contabilizarPago(client, id) {
   const { rows } = await client.query('select * from pago_proveedor where id = $1', [id]);
   const p = rows[0];
   if (!p) return;
+  if (p.estado === 'anulado') return borrar(client, 'pago_proveedor', id);
   const { rows: ap } = await client.query(
     `select c.clase, sum(a.valor) as v from pago_proveedor_aplicacion a join compra c on c.id = a.compra_id
      where a.pago_proveedor_id = $1 group by c.clase`, [id]
@@ -239,6 +242,7 @@ export async function contabilizarTraslado(client, id) {
   );
   const t = rows[0];
   if (!t) return;
+  if (t.estado === 'anulado') return borrar(client, 'traslado', id);
   if (t.emp_origen === t.emp_destino) return borrar(client, 'traslado', id); // entre bodegas de la misma empresa: no hay asiento
   const valor = r2(Number(t.cantidad) * Number(t.costo_unitario));
   await guardarAsiento(client, {

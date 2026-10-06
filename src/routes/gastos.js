@@ -6,6 +6,8 @@
 // fijo (→ cuenta 15xx + registro en activo_fijo para depreciarlo).
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
+import { anularCompra } from '../contabilidad/anulaciones.js';
+import { requireRole } from '../middleware/auth.js';
 import { CATEGORIAS_GASTO, CLASES_ACTIVO } from '../contabilidad/catalogos.js';
 import { calcularRetenciones } from '../contabilidad/retenciones.js';
 import { contabilizar } from '../contabilidad/contabilizar.js';
@@ -119,7 +121,7 @@ router.get('/', async (req, res) => {
   if (desde) { params.push(desde); w.push(`c.fecha >= $${params.length}`); }
   if (hasta) { params.push(hasta); w.push(`c.fecha <= $${params.length}`); }
   const { rows } = await pool.query(
-    `select c.id, c.fecha, c.numero_factura_proveedor, c.descripcion, c.subtotal, c.iva, c.retefuente, c.reteiva, c.reteica,
+    `select c.id, c.estado, c.motivo_anulacion, c.fecha, c.numero_factura_proveedor, c.descripcion, c.subtotal, c.iva, c.retefuente, c.reteiva, c.reteica,
             c.total, c.forma_pago, c.saldo, e.nombre as empresa, t.nombre as proveedor,
             (select string_agg(distinct gi.categoria, ', ') from gasto_item gi where gi.compra_id = c.id) as categorias,
             exists (select 1 from gasto_item gi where gi.compra_id = c.id and gi.tipo = 'activo_fijo') as tiene_activo
@@ -137,7 +139,7 @@ router.get('/activos-fijos', async (req, res) => {
     `select a.*, e.nombre as empresa,
             coalesce((select sum(l.credito) from asiento s join asiento_linea l on l.asiento_id = s.id
                       where s.origen = 'depreciacion' and s.origen_id = a.id and s.fecha <= current_date), 0) as depreciacion_acumulada
-     from activo_fijo a join empresa e on e.id = a.empresa_id ${w} order by a.fecha_compra desc`, params
+     from activo_fijo a join empresa e on e.id = a.empresa_id ${w ? `${w} and a.activo` : 'where a.activo'} order by a.fecha_compra desc`, params
   );
   res.json(rows.map((a) => ({ ...a, valor_en_libros: r2(Number(a.costo) - Number(a.depreciacion_acumulada)) })));
 });
@@ -145,4 +147,12 @@ router.get('/activos-fijos', async (req, res) => {
 router.get('/:id', async (req, res) => {
   const { rows } = await pool.query('select * from gasto_item where compra_id = $1 order by tipo, categoria', [req.params.id]);
   res.json(rows);
+});
+
+router.post('/:id/anular', requireRole('admin'), async (req, res) => {
+  try {
+    res.json(await anularCompra(req.params.id, req.body?.motivo, req.usuario?.sub));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });

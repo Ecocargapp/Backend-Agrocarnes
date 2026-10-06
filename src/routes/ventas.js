@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
+import { requireRole } from '../middleware/auth.js';
 import { registrarMovimiento } from '../db/inventario.js';
 import { emitidaElectronicamente } from './notas-credito.js';
 import { descargarPdf } from '../dian/facturas-factus.js';
 import { contabilizar } from '../contabilidad/contabilizar.js';
 import { resolverCuentaPago } from '../contabilidad/cuentas-pago.js';
+import { anularVentaLocal } from '../contabilidad/anulaciones.js';
 import { enviarFacturaADian, sincronizarEstado } from '../dian/cliente.js';
 
 export const router = Router();
@@ -214,46 +216,10 @@ router.post('/:id/dian/estado', async (req, res) => {
 // fue emitida electrónicamente, la anulación se hace con nota crédito (razón 2)
 // desde /notas-credito con anulacion=true. Esta ruta cubre el primer caso y
 // delega el segundo.
-router.post('/:id/anular', async (req, res) => {
-  const { motivo } = req.body || {};
-  if (!motivo) return res.status(400).json({ error: 'Indica el motivo de la anulación' });
-  const client = await pool.connect();
+router.post('/:id/anular', requireRole('admin'), async (req, res) => {
   try {
-    await client.query('begin');
-    const { rows } = await client.query('select * from factura_venta where id = $1 for update', [req.params.id]);
-    const f = rows[0];
-    if (!f) throw new Error('Factura no encontrada');
-    if (f.estado !== 'vigente') throw new Error('La factura ya está anulada');
-    if (emitidaElectronicamente(f)) throw new Error('La factura ya fue emitida electrónicamente: anúlala con una nota crédito de anulación (razón 2)');
-    const { rows: cobrado } = await client.query('select coalesce(sum(valor),0) as v from recibo_caja_aplicacion where factura_venta_id = $1', [f.id]);
-    if (Number(cobrado[0].v) > 0 && f.forma_pago === 'credito') {
-      throw new Error('La factura tiene cobros aplicados; registra primero la devolución del dinero o usa nota crédito');
-    }
-
-    // Reingresar el inventario que salió con la venta, al costo con el que salió.
-    const { rows: movs } = await client.query(
-      `select producto_id, bodega_id, cantidad, costo_unitario from movimiento_inventario
-       where referencia_tipo = 'factura_venta' and referencia_id = $1 and tipo = 'venta'`, [f.id]
-    );
-    for (const m of movs) {
-      await registrarMovimiento(client, {
-        tipo: 'anulacion_venta', producto_id: m.producto_id, bodega_id: m.bodega_id, cantidad: m.cantidad, costo_unitario: m.costo_unitario,
-        referencia_tipo: 'factura_venta', referencia_id: f.id, creado_por: req.usuario?.sub,
-      });
-    }
-    await client.query(
-      `update factura_venta set estado = 'anulada', saldo = 0, estado_dian = 'anulada', anulada_en = now(), anulada_por = $2, motivo_anulacion = $3 where id = $1`,
-      [f.id, req.usuario?.sub, motivo]
-    );
-    await client.query('commit');
-    await contabilizar('factura_venta', f.id);
-    const { rows: recs } = await pool.query('select distinct recibo_caja_id as id from recibo_caja_aplicacion where factura_venta_id = $1', [f.id]);
-    for (const r of recs) await contabilizar('recibo_caja', r.id);
-    res.json({ ok: true, estado: 'anulada' });
+    res.json(await anularVentaLocal(req.params.id, req.body?.motivo, req.usuario?.sub, emitidaElectronicamente));
   } catch (err) {
-    await client.query('rollback');
     res.status(400).json({ error: err.message });
-  } finally {
-    client.release();
   }
 });

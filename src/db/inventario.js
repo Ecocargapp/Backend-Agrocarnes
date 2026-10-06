@@ -2,8 +2,9 @@
 // para que "existencia" y "movimiento_inventario" nunca queden desincronizados.
 // Se usa dentro de una transacción (recibe el `client`, no el pool).
 
-const ENTRADAS = new Set(['compra', 'porcionado_entrada', 'traslado_entrada', 'produccion_entrada', 'devolucion_venta', 'anulacion_venta']);
-const SALIDAS = new Set(['porcionado_salida', 'traslado_salida', 'produccion_consumo', 'venta']);
+const ENTRADAS = new Set(['compra', 'porcionado_entrada', 'traslado_entrada', 'produccion_entrada', 'devolucion_venta', 'anulacion_venta', 'anulacion_salida']);
+const SALIDAS = new Set(['porcionado_salida', 'traslado_salida', 'produccion_consumo', 'venta', 'anulacion_entrada']);
+export const TIPOS_ENTRADA = ENTRADAS;
 
 export async function registrarMovimiento(client, {
   tipo, producto_id, bodega_id, cantidad, costo_unitario,

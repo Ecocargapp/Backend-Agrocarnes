@@ -10,6 +10,27 @@ entrega del día).
 
 ---
 
+## 2026.10.06.2 — Anulación de documentos con doble confirmación
+
+- Backend (migración `012_anulaciones.sql`): compras, gastos, recibos de caja,
+  comprobantes de egreso, traslados y órdenes de producción tienen `estado`
+  (vigente/anulado), fecha, usuario y motivo de anulación; tabla `anulacion`
+  como bitácora de todo lo anulado. Los documentos nunca se borran.
+- `POST /:id/anular` (solo administradores, motivo obligatorio) en compras,
+  gastos, ventas, traslados, producción y cartera (recibos y pagos). Al anular
+  se reversa el inventario con movimientos `anulacion_entrada`/`anulacion_salida`,
+  se elimina el asiento contable, se devuelven saldos de cartera y se dan de
+  baja los activos fijos con sus depreciaciones.
+- Reglas de seguridad: no se anula una compra cuyo inventario ya se vendió o
+  trasladó; si un egreso o recibo cubre varios documentos hay que anularlo
+  primero; el egreso o recibo exclusivo de un documento de contado se anula en
+  cascada. Una factura ya enviada a la DIAN se anula con nota crédito.
+- Frontend: botón **Anular** al lado de cada documento (Ventas, Compras,
+  Gastos, Traslados, Producción, recibos de caja y comprobantes de egreso en
+  Cartera) con doble confirmación: 1) consecuencias + motivo, 2) escribir
+  ANULAR. Los anulados quedan en gris con la marca "Anulado" y el motivo.
+  Nuevo listado de recibos de caja en Cartera → Por cobrar.
+
 ## 2026.10.06.1 — Cajas y cuentas bancarias, comprobante de egreso
 
 - Backend (migración `011_cuentas_pago_egresos.sql`): `cuenta_pago` (cajas,

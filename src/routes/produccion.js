@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
+import { anularProduccion } from '../contabilidad/anulaciones.js';
+import { requireRole } from '../middleware/auth.js';
 import { registrarMovimiento } from '../db/inventario.js';
 
 export const router = Router();
@@ -70,7 +72,7 @@ router.post('/', async (req, res) => {
 
 router.get('/', async (_req, res) => {
   const { rows } = await pool.query(`
-    select o.id, o.creado_en, coalesce(p.codigo || ' · ', '') || p.nombre as producto, p.unidad_medida, o.cantidad_producida,
+    select o.id, o.estado, o.motivo_anulacion, o.creado_en, coalesce(p.codigo || ' · ', '') || p.nombre as producto, p.unidad_medida, o.cantidad_producida,
            o.costo_unitario, b.nombre as bodega, e.nombre as empresa
     from orden_produccion o
     join producto p on p.id = o.producto_terminado_id
@@ -79,4 +81,12 @@ router.get('/', async (_req, res) => {
     order by o.creado_en desc limit 200
   `);
   res.json(rows);
+});
+
+router.post('/:id/anular', requireRole('admin'), async (req, res) => {
+  try {
+    res.json(await anularProduccion(req.params.id, req.body?.motivo, req.usuario?.sub));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });

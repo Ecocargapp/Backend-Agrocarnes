@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
+import { anularCompra } from '../contabilidad/anulaciones.js';
+import { requireRole } from '../middleware/auth.js';
 import { registrarMovimiento } from '../db/inventario.js';
 import { calcularRetenciones } from '../contabilidad/retenciones.js';
 import { contabilizar } from '../contabilidad/contabilizar.js';
@@ -89,7 +91,7 @@ router.get('/', async (req, res) => {
   let where = `where c.clase = 'inventario'`;
   if (empresa_id) { params.push(empresa_id); where += ' and c.empresa_id = $1'; }
   const { rows } = await pool.query(
-    `select c.id, c.fecha, c.numero_factura_proveedor, c.subtotal, c.iva, c.retefuente, c.reteiva, c.reteica, c.total, c.creado_en, c.forma_pago, c.fecha_vencimiento, c.saldo,
+    `select c.id, c.estado, c.motivo_anulacion, c.fecha, c.numero_factura_proveedor, c.subtotal, c.iva, c.retefuente, c.reteiva, c.reteica, c.total, c.creado_en, c.forma_pago, c.fecha_vencimiento, c.saldo,
             e.nombre as empresa, t.nombre as proveedor,
             (select count(*)::int from compra_item i where i.compra_id = c.id) as items
      from compra c
@@ -110,4 +112,13 @@ router.get('/:id', async (req, res) => {
     [req.params.id]
   );
   res.json(rows);
+});
+
+// Anula una compra (reversa inventario, saldo y contabilidad; anula en cascada su egreso de contado).
+router.post('/:id/anular', requireRole('admin'), async (req, res) => {
+  try {
+    res.json(await anularCompra(req.params.id, req.body?.motivo, req.usuario?.sub));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });

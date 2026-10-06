@@ -14,6 +14,8 @@
 
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
+import { anularRecibo, anularEgreso } from '../contabilidad/anulaciones.js';
+import { requireRole } from '../middleware/auth.js';
 import { contabilizar } from '../contabilidad/contabilizar.js';
 import { registrarEgreso, resolverCuentaPago } from '../contabilidad/cuentas-pago.js';
 
@@ -151,7 +153,7 @@ router.get('/recibos', async (req, res) => {
   let where = '';
   if (empresa_id) { params.push(empresa_id); where = 'where r.empresa_id = $1'; }
   const { rows } = await pool.query(
-    `select r.id, r.consecutivo, r.fecha, r.medio_pago, r.referencia, r.total, r.notas, e.nombre as empresa,
+    `select r.id, r.estado, r.motivo_anulacion, r.consecutivo, r.fecha, r.medio_pago, r.referencia, r.total, r.notas, e.nombre as empresa,
             (select nombre from cuenta_pago where id = r.cuenta_pago_id) as cuenta_pago,
             coalesce(t.nombre, 'Consumidor final') as cliente,
             (select string_agg(f.consecutivo, ', ' order by f.consecutivo)
@@ -261,7 +263,7 @@ router.get('/pagos', async (req, res) => {
   let where = '';
   if (empresa_id) { params.push(empresa_id); where = 'where p.empresa_id = $1'; }
   const { rows } = await pool.query(
-    `select p.id, p.consecutivo, p.fecha, p.medio_pago, p.referencia, p.total, p.notas, e.nombre as empresa, t.nombre as proveedor,
+    `select p.id, p.estado, p.motivo_anulacion, p.consecutivo, p.fecha, p.medio_pago, p.referencia, p.total, p.notas, e.nombre as empresa, t.nombre as proveedor,
             cp.nombre as cuenta_pago,
             (select string_agg(coalesce(c.numero_factura_proveedor, to_char(c.fecha, 'YYYY-MM-DD')), ', ')
                from pago_proveedor_aplicacion a join compra c on c.id = a.compra_id where a.pago_proveedor_id = p.id) as compras
@@ -310,4 +312,19 @@ router.get('/resumen', async (req, res) => {
     pool.query(`select coalesce(sum(saldo),0) as saldo, coalesce(sum(case when fecha_vencimiento < current_date then saldo else 0 end),0) as vencido from compra ${wc}`, params),
   ]);
   res.json({ por_cobrar: cxc.rows[0], por_pagar: cxp.rows[0] });
+});
+
+router.post('/recibos/:id/anular', requireRole('admin'), async (req, res) => {
+  try {
+    res.json(await anularRecibo(req.params.id, req.body?.motivo, req.usuario?.sub));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+router.post('/pagos/:id/anular', requireRole('admin'), async (req, res) => {
+  try {
+    res.json(await anularEgreso(req.params.id, req.body?.motivo, req.usuario?.sub));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });

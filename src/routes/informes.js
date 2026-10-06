@@ -150,13 +150,13 @@ router.get('/retenciones', async (req, res) => {
     `select coalesce(c.concepto_retencion, 'ninguna') as concepto, coalesce(k.nombre, 'Sin concepto') as nombre,
             count(*)::int as documentos, sum(c.subtotal) as base, sum(c.retefuente) as retefuente, sum(c.reteiva) as reteiva, sum(c.reteica) as reteica
      from compra c left join concepto_retencion k on k.codigo = c.concepto_retencion
-     where c.fecha between $1 and $2 ${we} and (c.retefuente > 0 or c.reteiva > 0 or c.reteica > 0)
+     where c.fecha between $1 and $2 ${we} and c.estado <> 'anulado' and (c.retefuente > 0 or c.reteiva > 0 or c.reteica > 0)
      group by 1, 2 order by 1`, params
   );
   const wr = empresa_id ? `and r.empresa_id = $3` : '';
   const { rows: nos } = await pool.query(
     `select coalesce(sum(r.retefuente), 0) as retefuente, coalesce(sum(r.reteiva), 0) as reteiva, coalesce(sum(r.reteica), 0) as reteica
-     from recibo_caja r where r.fecha between $1 and $2 ${wr}`, params
+     from recibo_caja r where r.fecha between $1 and $2 and r.estado <> 'anulado' ${wr}`, params
   );
   const tot = (k) => r2(practicadas.reduce((a, p) => a + Number(p[k]), 0));
   const aPagar = { retefuente: tot('retefuente'), reteiva: tot('reteiva'), reteica: tot('reteica') };

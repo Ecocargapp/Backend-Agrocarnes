@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
+import { anularTraslado } from '../contabilidad/anulaciones.js';
+import { requireRole } from '../middleware/auth.js';
 import { registrarMovimiento } from '../db/inventario.js';
 import { contabilizar } from '../contabilidad/contabilizar.js';
 
@@ -62,7 +64,7 @@ router.post('/', async (req, res) => {
 
 router.get('/', async (_req, res) => {
   const { rows } = await pool.query(`
-    select t.id, t.creado_en, coalesce(p.codigo || ' · ', '') || p.nombre as producto, p.unidad_medida, t.cantidad, t.costo_unitario,
+    select t.id, t.estado, t.motivo_anulacion, t.creado_en, coalesce(p.codigo || ' · ', '') || p.nombre as producto, p.unidad_medida, t.cantidad, t.costo_unitario,
            bo.nombre as bodega_origen, eo.nombre as empresa_origen,
            bd.nombre as bodega_destino, ed.nombre as empresa_destino,
            t.es_venta_intercompania
@@ -73,4 +75,12 @@ router.get('/', async (_req, res) => {
     order by t.creado_en desc limit 200
   `);
   res.json(rows);
+});
+
+router.post('/:id/anular', requireRole('admin'), async (req, res) => {
+  try {
+    res.json(await anularTraslado(req.params.id, req.body?.motivo, req.usuario?.sub));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
