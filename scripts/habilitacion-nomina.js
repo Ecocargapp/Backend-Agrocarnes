@@ -5,6 +5,7 @@
 //   node scripts/habilitacion-nomina.js "Agrocarnes"            → 20 nóminas
 //   node scripts/habilitacion-nomina.js "Agrocarnes" --solo=3,5  → solo esos casos
 //   node scripts/habilitacion-nomina.js "Agrocarnes" --ajuste=NEF12  → nota de ajuste (fase 2)
+//   node scripts/habilitacion-nomina.js "Agrocarnes" --rango=ID  → rango de nómina si hay varios activos
 //   node scripts/habilitacion-nomina.js "Agrocarnes" --ver       → muestra el JSON del caso 1 sin enviar
 //
 // El resultado queda en scripts/habilitacion-nomina-resultado.json.
@@ -27,6 +28,9 @@ if (cfg && !opcion('ver') && !/sandbox/.test(cfg.base_url) && !opcion('produccio
   console.error(`La cuenta de nómina apunta a ${cfg.base_url}, no al sandbox. Estas pruebas son para el sandbox (usa --produccion si de verdad quieres).`);
   process.exit(1);
 }
+// --rango=ID / --rango-ajuste=ID: rango a usar si la cuenta tiene varios activos.
+if (cfg && opcion('rango')) cfg.numbering_range_id_nomina = opcion('rango');
+if (cfg && opcion('rango-ajuste')) cfg.numbering_range_id_ajuste = opcion('rango-ajuste');
 const factus = cfg ? new FactusClient(cfg) : null;
 const sello = Date.now().toString(36).toUpperCase();
 
