@@ -20,6 +20,7 @@ import { router as carteraRouter } from './routes/cartera.js';
 import { router as notasCreditoRouter } from './routes/notas-credito.js';
 import { router as gastosRouter } from './routes/gastos.js';
 import { router as informesRouter } from './routes/informes.js';
+import { router as cuentasPagoRouter } from './routes/cuentas-pago.js';
 
 const app = express();
 const corsOrigin = process.env.CORS_ORIGIN;
@@ -47,6 +48,7 @@ app.use('/cartera', requireAuth, carteraRouter);
 app.use('/notas-credito', requireAuth, notasCreditoRouter);
 app.use('/gastos', requireAuth, gastosRouter);
 app.use('/informes', requireAuth, informesRouter);
+app.use('/cuentas-pago', requireAuth, cuentasPagoRouter);
 
 app.use((err, _req, res, _next) => {
   console.error(err);

@@ -15,6 +15,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { contabilizar } from '../contabilidad/contabilizar.js';
+import { registrarEgreso, resolverCuentaPago } from '../contabilidad/cuentas-pago.js';
 
 export const router = Router();
 
@@ -116,13 +117,15 @@ router.post('/recibos', async (req, res) => {
       total += valor;
     }
     if (ret[0] + ret[1] + ret[2] > total) throw new Error('Las retenciones no pueden superar el valor aplicado a las facturas');
+    const destino = await resolverCuentaPago(client, { empresa_id, medio_pago: medio_pago || 'efectivo', cuenta_pago_id: req.body.cuenta_pago_id, sentido: 'ingreso' });
     const { rows: emp } = await client.query(
       'update empresa set ultimo_recibo = ultimo_recibo + 1 where id = $1 returning ultimo_recibo', [empresa_id]
     );
     const { rows: rec } = await client.query(
-      `insert into recibo_caja (empresa_id, tercero_id, consecutivo, fecha, medio_pago, total, notas, creado_por, retefuente, reteiva, reteica)
-       values ($1, $2, $3, coalesce($4, current_date), $5, $6, $7, $8, $9, $10, $11) returning id, consecutivo`,
-      [empresa_id, tercero_id || null, emp[0].ultimo_recibo, fecha || null, medio_pago || 'efectivo', total, notas || null, req.usuario?.sub, ...ret]
+      `insert into recibo_caja (empresa_id, tercero_id, consecutivo, fecha, medio_pago, total, notas, creado_por, retefuente, reteiva, reteica, cuenta_pago_id, referencia)
+       values ($1, $2, $3, coalesce($4, current_date), $5, $6, $7, $8, $9, $10, $11, $12, $13) returning id, consecutivo`,
+      [empresa_id, tercero_id || null, emp[0].ultimo_recibo, fecha || null, medio_pago || 'efectivo', total, notas || null, req.usuario?.sub, ...ret,
+        destino?.id || null, req.body.referencia || null]
     );
     for (const a of aplicaciones) {
       await client.query(
@@ -148,7 +151,8 @@ router.get('/recibos', async (req, res) => {
   let where = '';
   if (empresa_id) { params.push(empresa_id); where = 'where r.empresa_id = $1'; }
   const { rows } = await pool.query(
-    `select r.id, r.consecutivo, r.fecha, r.medio_pago, r.total, r.notas, e.nombre as empresa,
+    `select r.id, r.consecutivo, r.fecha, r.medio_pago, r.referencia, r.total, r.notas, e.nombre as empresa,
+            (select nombre from cuenta_pago where id = r.cuenta_pago_id) as cuenta_pago,
             coalesce(t.nombre, 'Consumidor final') as cliente,
             (select string_agg(f.consecutivo, ', ' order by f.consecutivo)
                from recibo_caja_aplicacion a join factura_venta f on f.id = a.factura_venta_id
@@ -233,19 +237,16 @@ router.post('/pagos', async (req, res) => {
       if (valor > Number(c.saldo) + 0.005) throw new Error(`El valor supera el saldo de la compra ${c.numero_factura_proveedor || ''} (${c.saldo})`);
       total += valor;
     }
-    const { rows: emp } = await client.query('update empresa set ultimo_pago = ultimo_pago + 1 where id = $1 returning ultimo_pago', [empresa_id]);
-    const { rows: pago } = await client.query(
-      `insert into pago_proveedor (empresa_id, tercero_id, consecutivo, fecha, medio_pago, total, notas, creado_por)
-       values ($1, $2, $3, coalesce($4, current_date), $5, $6, $7, $8) returning id, consecutivo`,
-      [empresa_id, tercero_id, emp[0].ultimo_pago, fecha || null, medio_pago || 'transferencia', total, notas || null, req.usuario?.sub]
-    );
+    const pago = await registrarEgreso(client, {
+      empresa_id, tercero_id, fecha, medio_pago: medio_pago || 'transferencia', cuenta_pago_id: req.body.cuenta_pago_id,
+      referencia: req.body.referencia, notas, aplicaciones, creado_por: req.usuario?.sub,
+    });
     for (const a of aplicaciones) {
-      await client.query('insert into pago_proveedor_aplicacion (pago_proveedor_id, compra_id, valor) values ($1, $2, $3)', [pago[0].id, a.compra_id, Number(a.valor)]);
       await client.query('update compra set saldo = round(saldo - $1, 2) where id = $2', [Number(a.valor), a.compra_id]);
     }
     await client.query('commit');
-    await contabilizar('pago_proveedor', pago[0].id);
-    res.status(201).json({ id: pago[0].id, consecutivo: pago[0].consecutivo, total });
+    await contabilizar('pago_proveedor', pago.id);
+    res.status(201).json({ id: pago.id, consecutivo: pago.consecutivo, total, cuenta: pago.cuenta });
   } catch (err) {
     await client.query('rollback');
     res.status(400).json({ error: err.message });
@@ -260,14 +261,41 @@ router.get('/pagos', async (req, res) => {
   let where = '';
   if (empresa_id) { params.push(empresa_id); where = 'where p.empresa_id = $1'; }
   const { rows } = await pool.query(
-    `select p.id, p.consecutivo, p.fecha, p.medio_pago, p.total, p.notas, e.nombre as empresa, t.nombre as proveedor,
+    `select p.id, p.consecutivo, p.fecha, p.medio_pago, p.referencia, p.total, p.notas, e.nombre as empresa, t.nombre as proveedor,
+            cp.nombre as cuenta_pago,
             (select string_agg(coalesce(c.numero_factura_proveedor, to_char(c.fecha, 'YYYY-MM-DD')), ', ')
                from pago_proveedor_aplicacion a join compra c on c.id = a.compra_id where a.pago_proveedor_id = p.id) as compras
      from pago_proveedor p join empresa e on e.id = p.empresa_id join tercero t on t.id = p.tercero_id
+     left join cuenta_pago cp on cp.id = p.cuenta_pago_id
      ${where} order by p.fecha desc, p.creado_en desc limit 200`,
     params
   );
   res.json(rows);
+});
+
+// Comprobante de egreso (para imprimir): encabezado, documentos pagados con
+// sus retenciones e imputación contable.
+router.get('/pagos/:id/comprobante', async (req, res) => {
+  const { rows } = await pool.query(
+    `select p.*, e.nombre as empresa, e.nit as empresa_nit, t.nombre as beneficiario, t.tipo_documento, t.numero_documento,
+            t.direccion, t.telefono, cp.nombre as cuenta_pago, cp.tipo as cuenta_tipo, cp.banco, cp.numero as cuenta_numero,
+            u.nombre as elaborado_por
+     from pago_proveedor p join empresa e on e.id = p.empresa_id join tercero t on t.id = p.tercero_id
+     left join cuenta_pago cp on cp.id = p.cuenta_pago_id left join usuario u on u.id = p.creado_por
+     where p.id = $1`, [req.params.id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'Egreso no encontrado' });
+  const { rows: docs } = await pool.query(
+    `select c.id, c.clase, c.numero_factura_proveedor, c.fecha, c.descripcion, c.subtotal, c.iva, c.retefuente, c.reteiva, c.reteica,
+            c.total, c.saldo, a.valor as pagado,
+            (select string_agg(distinct coalesce(gi.descripcion, gi.categoria), ', ') from gasto_item gi where gi.compra_id = c.id) as detalle_gasto
+     from pago_proveedor_aplicacion a join compra c on c.id = a.compra_id where a.pago_proveedor_id = $1 order by c.fecha`, [req.params.id]
+  );
+  const { rows: asiento } = await pool.query(
+    `select l.cuenta, cu.nombre, l.debito, l.credito from asiento a join asiento_linea l on l.asiento_id = a.id join cuenta cu on cu.codigo = l.cuenta
+     where a.origen = 'pago_proveedor' and a.origen_id = $1 order by l.debito desc`, [req.params.id]
+  );
+  res.json({ ...rows[0], documentos: docs, asiento });
 });
 
 // ------------------------------------------------------------- resumen

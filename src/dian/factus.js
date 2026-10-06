@@ -154,7 +154,7 @@ export function codigoImpuesto(tipo) {
 }
 
 // Medio de pago local → código DIAN (tabla de medios de pago de Factus).
-const MEDIO_PAGO = { efectivo: '10', transferencia: '47', tarjeta: '48', tarjeta_credito: '48', tarjeta_debito: '49', consignacion: '42' };
+const MEDIO_PAGO = { efectivo: '10', cheque: '20', consignacion: '42', transferencia: '47', pse: '47', tarjeta: '48', tarjeta_credito: '48', tarjeta_debito: '49' };
 export function codigoMedioPago(medio, porDefecto) {
   return MEDIO_PAGO[(medio || '').toLowerCase()] || porDefecto || '10';
 }

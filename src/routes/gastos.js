@@ -9,6 +9,7 @@ import { pool } from '../db/pool.js';
 import { CATEGORIAS_GASTO, CLASES_ACTIVO } from '../contabilidad/catalogos.js';
 import { calcularRetenciones } from '../contabilidad/retenciones.js';
 import { contabilizar } from '../contabilidad/contabilizar.js';
+import { registrarEgreso } from '../contabilidad/cuentas-pago.js';
 
 export const router = Router();
 
@@ -64,7 +65,7 @@ router.post('/', async (req, res) => {
   if (total < 0) return res.status(400).json({ error: 'Las retenciones no pueden superar el valor del gasto' });
 
   const client = await pool.connect();
-  let compraId; let pagoId = null;
+  let compraId; let pagoId = null; let egreso = null;
   try {
     await client.query('begin');
     const venc = forma === 'credito'
@@ -92,14 +93,12 @@ router.post('/', async (req, res) => {
       }
     }
     if (forma === 'contado' && total > 0) {
-      const { rows: emp } = await client.query('update empresa set ultimo_pago = ultimo_pago + 1 where id = $1 returning ultimo_pago', [b.empresa_id]);
-      const { rows: pago } = await client.query(
-        `insert into pago_proveedor (empresa_id, tercero_id, consecutivo, fecha, medio_pago, total, notas, creado_por)
-         values ($1, $2, $3, coalesce($4, current_date), $5, $6, $7, $8) returning id`,
-        [b.empresa_id, b.proveedor_id, emp[0].ultimo_pago, b.fecha || null, b.medio_pago || 'efectivo', total, `Gasto de contado ${b.numero_factura_proveedor || ''}`.trim(), req.usuario?.sub]
-      );
-      pagoId = pago[0].id;
-      await client.query('insert into pago_proveedor_aplicacion (pago_proveedor_id, compra_id, valor) values ($1, $2, $3)', [pagoId, compraId, total]);
+      egreso = await registrarEgreso(client, {
+        empresa_id: b.empresa_id, tercero_id: b.proveedor_id, fecha: b.fecha, medio_pago: b.medio_pago || 'efectivo', cuenta_pago_id: b.cuenta_pago_id,
+        referencia: b.referencia_pago, notas: `Gasto de contado ${b.numero_factura_proveedor || ''} ${b.descripcion || ''}`.trim(),
+        aplicaciones: [{ compra_id: compraId, valor: total }], creado_por: req.usuario?.sub,
+      });
+      pagoId = egreso.id;
     }
     await client.query('commit');
   } catch (err) {
@@ -110,7 +109,7 @@ router.post('/', async (req, res) => {
   }
   await contabilizar('compra', compraId);
   if (pagoId) await contabilizar('pago_proveedor', pagoId);
-  res.status(201).json({ id: compraId, subtotal, iva, retefuente: ret.f, reteiva: ret.i, reteica: ret.c, total, retencion_calculada: calc });
+  res.status(201).json({ id: compraId, subtotal, iva, retefuente: ret.f, reteiva: ret.i, reteica: ret.c, total, retencion_calculada: calc, egreso });
 });
 
 router.get('/', async (req, res) => {

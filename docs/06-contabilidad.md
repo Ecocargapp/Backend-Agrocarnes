@@ -24,6 +24,16 @@ asientos manuales (aportes de capital) no se tocan en una reconstrucción.
 Venta anulada sin nota crédito: se elimina su asiento (la venta no existió).
 Venta anulada con nota crédito: se conserva y la nota la reversa.
 
+## Cajas, cuentas bancarias y egresos
+
+Configuración → *Cajas y cuentas bancarias* (`cuenta_pago`). Cada caja, banco
+o tarjeta de crédito tiene su subcuenta (110505 / 111005NN / 210510NN). Todo
+pago a proveedor (compra o gasto de contado, o pago desde Cartera) es un
+**comprobante de egreso** (`pago_proveedor`) con medio de pago, cuenta de
+origen y referencia; el asiento acredita la subcuenta de esa cuenta. Los
+recibos de caja y las ventas de contado debitan la caja o banco donde entra el
+dinero. Registros anteriores sin cuenta: caja (efectivo) o 1110 genérica.
+
 ## Gastos y activos fijos
 
 Pantalla **Gastos**. Se guardan en `compra` con `clase = 'gasto'` (así entran

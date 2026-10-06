@@ -3,6 +3,7 @@ import { pool } from '../db/pool.js';
 import { registrarMovimiento } from '../db/inventario.js';
 import { calcularRetenciones } from '../contabilidad/retenciones.js';
 import { contabilizar } from '../contabilidad/contabilizar.js';
+import { registrarEgreso } from '../contabilidad/cuentas-pago.js';
 
 export const router = Router();
 
@@ -27,7 +28,7 @@ router.post('/', async (req, res) => {
   const total = r2(subtotal + iva - ret.f - ret.i - ret.c); // neto a pagar al proveedor
 
   const client = await pool.connect();
-  let compraId; let pagoId = null;
+  let compraId; let pagoId = null; let egreso = null;
   try {
     await client.query('begin');
 
@@ -44,14 +45,12 @@ router.post('/', async (req, res) => {
     compraId = compraRows[0].id;
 
     if (forma_pago === 'contado' && total > 0) {
-      const { rows: emp } = await client.query('update empresa set ultimo_pago = ultimo_pago + 1 where id = $1 returning ultimo_pago', [empresa_id]);
-      const { rows: pago } = await client.query(
-        `insert into pago_proveedor (empresa_id, tercero_id, consecutivo, fecha, medio_pago, total, notas, creado_por)
-         values ($1, $2, $3, coalesce($4, current_date), $5, $6, $7, $8) returning id`,
-        [empresa_id, proveedor_id, emp[0].ultimo_pago, fecha || null, medio_pago || 'efectivo', total, `Compra de contado ${numero_factura_proveedor || ''}`.trim(), req.usuario?.sub]
-      );
-      pagoId = pago[0].id;
-      await client.query('insert into pago_proveedor_aplicacion (pago_proveedor_id, compra_id, valor) values ($1, $2, $3)', [pago[0].id, compraId, total]);
+      const eg = await registrarEgreso(client, {
+        empresa_id, tercero_id: proveedor_id, fecha, medio_pago: medio_pago || 'efectivo', cuenta_pago_id: req.body.cuenta_pago_id,
+        referencia: req.body.referencia_pago, notas: `Compra de contado ${numero_factura_proveedor || ''}`.trim(),
+        aplicaciones: [{ compra_id: compraId, valor: total }], creado_por: req.usuario?.sub,
+      });
+      pagoId = eg.id; egreso = eg;
     }
 
     for (const item of items) {
@@ -81,7 +80,7 @@ router.post('/', async (req, res) => {
   }
   await contabilizar('compra', compraId);
   if (pagoId) await contabilizar('pago_proveedor', pagoId);
-  res.status(201).json({ id: compraId, subtotal, iva, retefuente: ret.f, reteiva: ret.i, reteica: ret.c, total, retencion_calculada: calc });
+  res.status(201).json({ id: compraId, subtotal, iva, retefuente: ret.f, reteiva: ret.i, reteica: ret.c, total, retencion_calculada: calc, egreso });
 });
 
 router.get('/', async (req, res) => {

@@ -4,6 +4,7 @@ import { registrarMovimiento } from '../db/inventario.js';
 import { emitidaElectronicamente } from './notas-credito.js';
 import { descargarPdf } from '../dian/facturas-factus.js';
 import { contabilizar } from '../contabilidad/contabilizar.js';
+import { resolverCuentaPago } from '../contabilidad/cuentas-pago.js';
 import { enviarFacturaADian, sincronizarEstado } from '../dian/cliente.js';
 
 export const router = Router();
@@ -49,11 +50,13 @@ router.post('/', async (req, res) => {
 
     if (forma_pago === 'contado') {
       // Venta de contado: se registra el cobro de inmediato para que la cartera cuadre.
+      const destino = await resolverCuentaPago(client, { empresa_id, medio_pago: medio_pago || 'efectivo', cuenta_pago_id: req.body.cuenta_pago_id, sentido: 'ingreso' });
       const { rows: emp } = await client.query('update empresa set ultimo_recibo = ultimo_recibo + 1 where id = $1 returning ultimo_recibo', [empresa_id]);
       const { rows: rec } = await client.query(
-        `insert into recibo_caja (empresa_id, tercero_id, consecutivo, medio_pago, total, notas, creado_por)
-         values ($1, $2, $3, $4, $5, $6, $7) returning id`,
-        [empresa_id, cliente_id || null, emp[0].ultimo_recibo, medio_pago || 'efectivo', total, `Venta de contado ${consecutivo}`, req.usuario?.sub]
+        `insert into recibo_caja (empresa_id, tercero_id, consecutivo, medio_pago, total, notas, creado_por, cuenta_pago_id, referencia)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
+        [empresa_id, cliente_id || null, emp[0].ultimo_recibo, medio_pago || 'efectivo', total, `Venta de contado ${consecutivo}`, req.usuario?.sub,
+          destino?.id || null, req.body.referencia_pago || null]
       );
       reciboId = rec[0].id;
       await client.query('insert into recibo_caja_aplicacion (recibo_caja_id, factura_venta_id, valor) values ($1, $2, $3)', [rec[0].id, facturaId, total]);

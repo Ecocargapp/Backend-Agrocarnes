@@ -20,6 +20,16 @@ import { cuentaDisponible } from './catalogos.js';
 
 const r2 = (n) => Math.round(Number(n || 0) * 100) / 100;
 
+// Cuenta contable de la caja/banco/tarjeta del pago; sin cuenta asignada
+// (registros anteriores) se usa la genérica según el medio.
+async function cuentaDe(client, cuentaPagoId, medio) {
+  if (cuentaPagoId) {
+    const { rows } = await client.query('select cuenta_contable from cuenta_pago where id = $1', [cuentaPagoId]);
+    if (rows[0]) return rows[0].cuenta_contable;
+  }
+  return cuentaDisponible(medio);
+}
+
 async function guardarAsiento(client, { empresa_id, fecha, origen, origen_id, periodo = null, descripcion, lineas }) {
   await client.query(
     `delete from asiento where origen = $1 and origen_id = $2 and coalesce(periodo, '') = coalesce($3, '')`,
@@ -183,6 +193,7 @@ export async function contabilizarRecibo(client, id) {
   const { rows } = await client.query('select * from recibo_caja where id = $1', [id]);
   const r = rows[0];
   if (!r) return;
+  const cuentaR = await cuentaDe(client, r.cuenta_pago_id, r.medio_pago);
   // Lo aplicado a facturas anuladas se considera dinero devuelto: no se contabiliza.
   const { rows: ap } = await client.query(
     `select coalesce(sum(a.valor), 0) as v from recibo_caja_aplicacion a join factura_venta f on f.id = a.factura_venta_id
@@ -194,7 +205,7 @@ export async function contabilizarRecibo(client, id) {
   await guardarAsiento(client, {
     empresa_id: r.empresa_id, fecha: r.fecha, origen: 'recibo_caja', origen_id: id, descripcion: `Recibo de caja ${r.consecutivo} (${r.medio_pago})`,
     lineas: [
-      { cuenta: cuentaDisponible(r.medio_pago), debito: r2(aplicado - ret.f - ret.i - ret.c) },
+      { cuenta: cuentaR, debito: r2(aplicado - ret.f - ret.i - ret.c) },
       { cuenta: '135515', tercero_id: r.tercero_id, debito: ret.f, descripcion: 'Retención en la fuente que nos practicaron' },
       { cuenta: '135517', tercero_id: r.tercero_id, debito: ret.i, descripcion: 'ReteIVA que nos practicaron' },
       { cuenta: '135518', tercero_id: r.tercero_id, debito: ret.c, descripcion: 'ReteICA que nos practicaron' },
@@ -214,9 +225,9 @@ export async function contabilizarPago(client, id) {
   );
   const lineas = ap.map((a) => ({ cuenta: a.clase === 'gasto' ? '2335' : '2205', tercero_id: p.tercero_id, debito: a.v }));
   const total = r2(ap.reduce((s, a) => s + Number(a.v), 0));
-  lineas.push({ cuenta: cuentaDisponible(p.medio_pago), credito: total });
+  lineas.push({ cuenta: await cuentaDe(client, p.cuenta_pago_id, p.medio_pago), credito: total, descripcion: p.referencia ? `Ref. ${p.referencia}` : null });
   await guardarAsiento(client, {
-    empresa_id: p.empresa_id, fecha: p.fecha, origen: 'pago_proveedor', origen_id: id, descripcion: `Pago a proveedor ${p.consecutivo} (${p.medio_pago})`, lineas,
+    empresa_id: p.empresa_id, fecha: p.fecha, origen: 'pago_proveedor', origen_id: id, descripcion: `Comprobante de egreso ${p.consecutivo} (${p.medio_pago})`, lineas,
   });
 }
 

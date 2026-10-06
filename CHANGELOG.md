@@ -10,6 +10,24 @@ entrega del día).
 
 ---
 
+## 2026.10.06.1 — Cajas y cuentas bancarias, comprobante de egreso
+
+- Backend (migración `011_cuentas_pago_egresos.sql`): `cuenta_pago` (cajas,
+  cuentas bancarias y tarjetas de crédito por empresa), cada una con su
+  subcuenta contable (110505 caja, 111005NN bancos, 210510NN tarjetas), así el
+  balance muestra el saldo por banco. Cada empresa arranca con su "Caja general".
+- Egresos: compras y gastos de contado y pagos de Cartera generan un
+  **comprobante de egreso** numerado con medio de pago (efectivo,
+  transferencia, PSE, consignación, cheque, tarjeta débito/crédito), cuenta de
+  la que sale el dinero y referencia (N.° de transacción, cheque o
+  aprobación). El sistema valida que el medio corresponda a la cuenta
+  (efectivo → caja, cheque → banco…). `GET /cartera/pagos/:id/comprobante`.
+- Recibos de caja y ventas de contado registran a qué caja o banco entra el dinero.
+- Frontend: selector de medio y cuenta en Compras, Gastos, Ventas y Cartera;
+  comprobante de egreso imprimible (valor en letras, documentos pagados con
+  retenciones, imputación contable y firmas); listado de egresos en Cartera →
+  Por pagar; Configuración → Cajas y cuentas bancarias.
+
 ## 2026.10.02.2 — Contabilidad automática (PUC), módulo de Gastos e Informes
 
 - **Contabilidad automática** (migración `010_contabilidad.sql`,
