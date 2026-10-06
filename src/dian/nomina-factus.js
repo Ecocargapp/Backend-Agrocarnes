@@ -187,6 +187,11 @@ export async function enviarNomina(id) {
     return { estado: aceptada ? 'aceptada' : 'rechazada', numero: d.number, cune: d.cune, mensaje: textoErrores(d.errors) };
   } catch (err) {
     const rechazo = err instanceof FactusError && err.status >= 400 && err.status < 500 && ![401, 429].includes(err.status);
+    // Si Factus falló (5xx) o la dejó pendiente, se borra allá (solo es posible si
+    // no está validada) para que el reintento o las siguientes no queden bloqueados (409).
+    if (err instanceof FactusError && (err.status >= 500 || err.status === 409)) {
+      await new FactusClient(cfg).delete(`v2/payrolls/reference/${encodeURIComponent(referencia)}`).catch(() => {});
+    }
     const mensaje = err instanceof FactusError ? (textoErrores(err.body?.data?.errors || err.body?.errors) || err.message) : err.message;
     await marcar(id, rechazo ? 'rechazada' : 'error', { dian_mensaje: String(mensaje).slice(0, 2000), dian_intentos: intento + 1 });
     return { estado: rechazo ? 'rechazada' : 'error', mensaje };

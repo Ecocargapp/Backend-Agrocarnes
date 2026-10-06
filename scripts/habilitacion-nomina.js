@@ -9,7 +9,7 @@
 //   node scripts/habilitacion-nomina.js "Agrocarnes" --ver       → muestra el JSON del caso 1 sin enviar
 //
 // El resultado queda en scripts/habilitacion-nomina-resultado.json.
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { pool } from '../src/db/pool.js';
 import { liquidar } from '../src/nomina/liquidar.js';
 import { armarNomina, configNomina } from '../src/dian/nomina-factus.js';
@@ -40,6 +40,17 @@ if (opcion('ajuste')) {
   process.exit(0);
 }
 
+// --limpiar: borra en Factus las nóminas que quedaron pendientes (sin validar)
+// en la última corrida; una pendiente bloquea las siguientes con 409.
+if (opcion('limpiar')) {
+  const previos = JSON.parse(await readFile(new URL('./habilitacion-nomina-resultado.json', import.meta.url), 'utf8').catch(() => '[]'));
+  for (const r of previos.filter((x) => !x.ok && x.enviado?.reference_code)) {
+    try { await factus.delete(`v2/payrolls/reference/${encodeURIComponent(r.enviado.reference_code)}`); console.log(`borrada pendiente ${r.enviado.reference_code} (caso ${r.caso})`); }
+    catch (err) { console.log(`no se pudo borrar ${r.enviado.reference_code}: ${err.message.slice(0, 200)}`); }
+  }
+  process.exit(0);
+}
+
 const solo = opcion('solo') ? String(opcion('solo')).split(',').map(Number) : null;
 const resultados = [];
 for (const c of CASOS_PRUEBA.filter((x) => !solo || solo.includes(x.n))) {
@@ -62,6 +73,8 @@ for (const c of CASOS_PRUEBA.filter((x) => !solo || solo.includes(x.n))) {
     resultados.push({ caso: c.n, titulo: c.titulo, ok, numero: d.number, cune: d.cune, neto_factus: d.net_balance, neto_calculado: L.neto, errores: textoErrores(d.errors) });
   } catch (err) {
     const msg = textoErrores(err.body?.data?.errors || err.body?.errors) || err.message;
+    // Un 500 puede dejar la nómina "pendiente" en Factus y bloquear las siguientes: se borra.
+    if (err.status >= 500) await factus.delete(`v2/payrolls/reference/${encodeURIComponent(body.reference_code)}`).catch(() => {});
     console.log(`✘ ${msg.slice(0, 300)}`);
     resultados.push({ caso: c.n, titulo: c.titulo, ok: false, error: msg, enviado: body });
   }
