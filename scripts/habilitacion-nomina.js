@@ -18,7 +18,7 @@ import { EMPLEADOS_PRUEBA, CASOS_PRUEBA } from '../src/nomina/casos-habilitacion
 
 const args = process.argv.slice(2);
 const nombreEmpresa = args.find((a) => !a.startsWith('--')) || 'Agrocarnes';
-const opcion = (k) => args.find((a) => a.startsWith(`--${k}`))?.split('=')[1] ?? (args.includes(`--${k}`) ? true : null);
+const opcion = (k) => args.find((a) => a.startsWith(`--${k}=`))?.slice(k.length + 3) ?? (args.includes(`--${k}`) ? true : null);
 
 const { rows } = await pool.query('select id, nombre from empresa where nombre ilike $1', [nombreEmpresa]);
 if (!rows[0]) { console.error(`No existe la empresa "${nombreEmpresa}"`); process.exit(1); }
