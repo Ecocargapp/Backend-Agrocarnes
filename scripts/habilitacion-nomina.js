@@ -74,8 +74,9 @@ for (const c of CASOS_PRUEBA.filter((x) => !solo || solo.includes(x.n))) {
     resultados.push({ caso: c.n, titulo: c.titulo, ok, numero: d.number, cune: d.cune, neto_factus: d.net_balance, neto_calculado: L.neto, errores: textoErrores(d.errors) });
   } catch (err) {
     const msg = textoErrores(err.body?.data?.errors || err.body?.errors) || err.message;
-    // Un 500 puede dejar la nómina "pendiente" en Factus y bloquear las siguientes: se borra.
-    if (err.status >= 500) await factus.delete(`v2/payrolls/reference/${encodeURIComponent(body.reference_code)}`).catch(() => {});
+    // Un 500 puede dejar la nómina "pendiente" en Factus (bloquea las siguientes con 409):
+    // se reenvía con --solo=N --referencia=<la misma> y Factus la termina de validar.
+    if (err.status >= 500) console.log(`   ↳ reenviar con: --solo=${c.n} --referencia=${body.reference_code}`);
     console.log(`✘ ${msg.slice(0, 300)}`);
     resultados.push({ caso: c.n, titulo: c.titulo, ok: false, error: msg, enviado: body });
   }

@@ -172,7 +172,9 @@ export async function enviarNomina(id) {
   }
   // Un reenvío después de un rechazo necesita un reference_code nuevo.
   const intento = Number(n.dian_intentos || 0);
-  const referencia = intento > 0 && ['rechazada', 'error'].includes(n.estado_dian) ? `NOM-${n.id.slice(0, 8)}-${intento + 1}` : (n.referencia_envio || `NOM-${n.id.slice(0, 8)}-1`);
+  // Tras un error de Factus/DIAN (5xx) se reenvía con la MISMA referencia: Factus
+  // retoma la nómina que quedó pendiente y la valida (si se cambia, responde 409).
+  const referencia = intento > 0 && n.estado_dian === 'rechazada' ? `NOM-${n.id.slice(0, 8)}-${intento + 1}` : (n.referencia_envio || `NOM-${n.id.slice(0, 8)}-1`);
   await pool.query('update nomina set referencia_envio = $2 where id = $1', [id, referencia]);
   try {
     const factus = new FactusClient(cfg);
@@ -186,12 +188,7 @@ export async function enviarNomina(id) {
     });
     return { estado: aceptada ? 'aceptada' : 'rechazada', numero: d.number, cune: d.cune, mensaje: textoErrores(d.errors) };
   } catch (err) {
-    const rechazo = err instanceof FactusError && err.status >= 400 && err.status < 500 && ![401, 429].includes(err.status);
-    // Si Factus falló (5xx) o la dejó pendiente, se borra allá (solo es posible si
-    // no está validada) para que el reintento o las siguientes no queden bloqueados (409).
-    if (err instanceof FactusError && (err.status >= 500 || err.status === 409)) {
-      await new FactusClient(cfg).delete(`v2/payrolls/reference/${encodeURIComponent(referencia)}`).catch(() => {});
-    }
+    const rechazo = err instanceof FactusError && err.status >= 400 && err.status < 500 && ![401, 409, 429].includes(err.status); // 409 = pendiente en Factus: se reintenta igual
     const mensaje = err instanceof FactusError ? (textoErrores(err.body?.data?.errors || err.body?.errors) || err.message) : err.message;
     await marcar(id, rechazo ? 'rechazada' : 'error', { dian_mensaje: String(mensaje).slice(0, 2000), dian_intentos: intento + 1 });
     return { estado: rechazo ? 'rechazada' : 'error', mensaje };

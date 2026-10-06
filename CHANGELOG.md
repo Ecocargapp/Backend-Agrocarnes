@@ -25,6 +25,11 @@ entrega del día).
   retención por salarios en el informe de retenciones.
 - `scripts/habilitacion-nomina.js`: set de 20 pruebas de habilitación para el
   sandbox de Factus (sin escribir en la base de datos).
+- Habilitación en el sandbox de Factus (6-oct-2026): las 20 nóminas del set
+  fueron aceptadas por la DIAN (NEF1 a NEF20, cuenta de Agropollo). Ajustes que
+  salieron de las pruebas: `pay_period_half` va como entero (1/2) y, si Factus
+  responde 500 o 409, se reenvía con la misma referencia para que termine de
+  validar la nómina pendiente.
 - Frontend: módulo Nómina (liquidar con vista previa en vivo, listado con
   estado DIAN, PDF, anular, Excel), registro de trabajadores y cuenta DIAN.
 
