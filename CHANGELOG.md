@@ -10,6 +10,24 @@ entrega del día).
 
 ---
 
+## 2026.10.06.3 — Nómina electrónica con Factus
+
+- Backend (migración `013_nomina.sql`): trabajadores (`empleado`), nóminas por
+  periodo mensual o quincenal (`nomina`) con novedades, liquidación, estado
+  DIAN, CUNE y nota de ajuste; `empresa.nomina_config` con la cuenta de Factus
+  de nómina; cuentas PUC de nómina (5105xx, 2370xx, 238030, 236505, 2505).
+- Motor de liquidación con la ley 2026: SMMLV, auxilio de transporte, horas
+  extra y recargos (jornada 42 h y dominical 90% desde julio), vacaciones,
+  licencias, incapacidades, prima, cesantías e intereses, salud, pensión, FSP,
+  retención procedimiento 1 y aportes del empleador.
+- Envío a la DIAN por Factus (`v2/payrolls`), PDF, anulación con nota de ajuste
+  de eliminación (`v2/adjustment-payrolls`), asiento contable automático y
+  retención por salarios en el informe de retenciones.
+- `scripts/habilitacion-nomina.js`: set de 20 pruebas de habilitación para el
+  sandbox de Factus (sin escribir en la base de datos).
+- Frontend: módulo Nómina (liquidar con vista previa en vivo, listado con
+  estado DIAN, PDF, anular, Excel), registro de trabajadores y cuenta DIAN.
+
 ## 2026.10.06.2 — Anulación de documentos con doble confirmación
 
 - Backend (migración `012_anulaciones.sql`): compras, gastos, recibos de caja,

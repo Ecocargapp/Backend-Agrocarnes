@@ -14,6 +14,8 @@
 //   Pago proveedor Dr 2205/2335                Cr 1105/1110
 //   Traslado entre empresas (mismo NIT): origen Dr 2895 Cr 1435 · destino Dr 1435 Cr 2895
 //   Depreciación   Dr 5160                     Cr 1592 (mensual, línea recta)
+//   Nómina         Dr 5105xx devengados        Cr 2370/2380 aportes, 236505 retención, 1105/1110 neto pagado
+//                  Dr 5105xx aportes empleador Cr 2370/2380 (salud, pensión, ARL, caja, SENA, ICBF)
 
 import { pool } from '../db/pool.js';
 import { cuentaDisponible } from './catalogos.js';
@@ -286,6 +288,45 @@ export async function generarDepreciaciones(client, hasta = new Date()) {
   return creados;
 }
 
+
+// ------------------------------------------------------------------ nómina
+const CUENTA_DEVENGADO = {
+  suel: '510506', hora: '510515', comi: '510518', inca: '510524', tra: '510527', prim: '510536', vaca: '510539',
+  auxi: '510545', boni: '510548', lice: '510560', otro: '510595',
+};
+const CUENTA_DEDUCCION = {
+  salu: '237005', pens: '238030', dedu: '238030', rete: '236505', libr: '237030', anti: '1330',
+  sind: '237045', otra: '237045', pevo: '237045', afco: '237045',
+};
+export async function contabilizarNomina(client, id) {
+  const { rows } = await client.query('select * from nomina where id = $1', [id]);
+  const n = rows[0];
+  if (!n) return;
+  if (n.estado === 'anulado') return borrar(client, 'nomina', id);
+  const L = n.liquidacion;
+  const nombre = [n.empleado_snapshot.primer_nombre, n.empleado_snapshot.primer_apellido].join(' ');
+  const lineas = [];
+  for (const d of L.devengados) {
+    const cuenta = d.clave === 'cesa' ? (d.codigo === '2' ? '510533' : '510530') : (CUENTA_DEVENGADO[d.clave] || '510595');
+    lineas.push({ cuenta, debito: d.valor, descripcion: d.nombre });
+  }
+  for (const d of L.deducciones) lineas.push({ cuenta: CUENTA_DEDUCCION[d.clave] || '237045', credito: d.valor, descripcion: d.nombre });
+  lineas.push({ cuenta: await cuentaDe(client, n.cuenta_pago_id, n.medio_pago), credito: L.neto, descripcion: `Pago neto a ${nombre}` });
+  const a = L.aportes || {};
+  const aporte = (debito, credito, valor, desc) => { if (valor > 0) lineas.push({ cuenta: debito, debito: valor, descripcion: desc }, { cuenta: credito, credito: valor, descripcion: desc }); };
+  aporte('510569', '237005', a.salud, 'Aporte salud empleador');
+  aporte('510570', '238030', a.pension, 'Aporte pensión empleador');
+  aporte('510568', '237006', a.arl, 'Aporte ARL');
+  aporte('510572', '237010', a.caja, 'Caja de compensación');
+  aporte('510578', '237010', a.sena, 'SENA');
+  aporte('510575', '237010', a.icbf, 'ICBF');
+  const periodo = `${n.anio}-${String(n.mes).padStart(2, '0')}${n.quincena ? ` (${n.quincena === '2nd' ? '2.ª' : '1.ª'} quincena)` : ''}`;
+  await guardarAsiento(client, {
+    empresa_id: n.empresa_id, fecha: n.fecha_pago, origen: 'nomina', origen_id: id,
+    descripcion: `Nómina ${periodo} · ${nombre}${n.numero ? ` · ${n.numero}` : ''}`, lineas,
+  });
+}
+
 // ------------------------------------------------------------- orquestación
 const FUNCIONES = {
   factura_venta: contabilizarVenta,
@@ -294,6 +335,7 @@ const FUNCIONES = {
   recibo_caja: contabilizarRecibo,
   pago_proveedor: contabilizarPago,
   traslado: contabilizarTraslado,
+  nomina: contabilizarNomina,
 };
 
 // Para llamar desde las rutas después de guardar un documento. Nunca rompe la
@@ -327,6 +369,7 @@ export async function reconstruirContabilidad() {
       recibo_caja: 'select id from recibo_caja order by fecha, creado_en',
       pago_proveedor: 'select id from pago_proveedor order by fecha, creado_en',
       traslado: 'select id from traslado order by creado_en',
+      nomina: 'select id from nomina order by fecha_pago, creado_en',
     };
     for (const [origen, sql] of Object.entries(fuentes)) {
       const { rows } = await client.query(sql);

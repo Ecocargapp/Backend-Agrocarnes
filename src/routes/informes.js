@@ -158,16 +158,23 @@ router.get('/retenciones', async (req, res) => {
     `select coalesce(sum(r.retefuente), 0) as retefuente, coalesce(sum(r.reteiva), 0) as reteiva, coalesce(sum(r.reteica), 0) as reteica
      from recibo_caja r where r.fecha between $1 and $2 and r.estado <> 'anulado' ${wr}`, params
   );
+  // Retención por salarios (nómina), concepto aparte en el formulario 350.
+  const wn = empresa_id ? `and n.empresa_id = $3` : '';
+  const { rows: sal } = await pool.query(
+    `select coalesce(sum((d->>'valor')::numeric), 0) as v, count(distinct n.id)::int as nominas
+     from nomina n cross join lateral jsonb_array_elements(n.liquidacion->'deducciones') d
+     where n.fecha_pago between $1 and $2 and n.estado <> 'anulado' and d->>'clave' = 'rete' ${wn}`, params
+  );
   const tot = (k) => r2(practicadas.reduce((a, p) => a + Number(p[k]), 0));
-  const aPagar = { retefuente: tot('retefuente'), reteiva: tot('reteiva'), reteica: tot('reteica') };
-  aPagar.total_formulario_350 = r2(aPagar.retefuente + aPagar.reteiva);
+  const aPagar = { retefuente: tot('retefuente'), reteiva: tot('reteiva'), reteica: tot('reteica'), salarios: r2(sal[0].v) };
+  aPagar.total_formulario_350 = r2(aPagar.retefuente + aPagar.reteiva + aPagar.salarios);
   const nosPracticaron = { retefuente: r2(nos[0].retefuente), reteiva: r2(nos[0].reteiva), reteica: r2(nos[0].reteica) };
   res.json({
     desde, hasta,
     practicadas: practicadas.map((p) => ({ ...p, base: r2(p.base), retefuente: r2(p.retefuente), reteiva: r2(p.reteiva), reteica: r2(p.reteica) })),
     a_pagar: aPagar,
     nos_practicaron: nosPracticaron,
-    resultado_neto: r2(aPagar.retefuente + aPagar.reteiva + aPagar.reteica - nosPracticaron.retefuente - nosPracticaron.reteiva - nosPracticaron.reteica),
+    resultado_neto: r2(aPagar.retefuente + aPagar.reteiva + aPagar.reteica + aPagar.salarios - nosPracticaron.retefuente - nosPracticaron.reteiva - nosPracticaron.reteica),
   });
 });
 
