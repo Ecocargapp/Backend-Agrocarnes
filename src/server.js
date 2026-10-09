@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 
-import { requireAuth } from './middleware/auth.js';
+import { requireAuth, requireRole } from './middleware/auth.js';
 import { iniciarJobDian } from './dian/cliente.js';
 import { iniciarJobNotasCredito } from './dian/notas.js';
 import { router as authRouter } from './routes/auth.js';
@@ -22,6 +22,7 @@ import { router as gastosRouter } from './routes/gastos.js';
 import { router as informesRouter } from './routes/informes.js';
 import { router as cuentasPagoRouter } from './routes/cuentas-pago.js';
 import { router as nominaRouter } from './routes/nomina.js';
+import { router as usuariosRouter } from './routes/usuarios.js';
 
 const app = express();
 const corsOrigin = process.env.CORS_ORIGIN;
@@ -50,7 +51,8 @@ app.use('/notas-credito', requireAuth, notasCreditoRouter);
 app.use('/gastos', requireAuth, gastosRouter);
 app.use('/informes', requireAuth, informesRouter);
 app.use('/cuentas-pago', requireAuth, cuentasPagoRouter);
-app.use('/nomina', requireAuth, nominaRouter);
+app.use('/nomina', requireAuth, requireRole('admin'), nominaRouter);
+app.use('/usuarios', requireAuth, requireRole('admin'), usuariosRouter);
 
 app.use((err, _req, res, _next) => {
   console.error(err);

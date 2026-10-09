@@ -1,3 +1,4 @@
+import { requireRole } from '../middleware/auth.js';
 // Notas crédito sobre facturas de venta.
 //
 // Razones (códigos DIAN, los mismos que usa Arco):
@@ -30,7 +31,7 @@ const RAZONES = { 1: 'Devolución parcial', 2: 'Anulación de factura', 3: 'Reba
 
 // body: { factura_venta_id, razon, items: [{producto_id, cantidad, precio_unitario}], reingresa_inventario, bodega_id, notas, anulacion }
 // Si anulacion=true (o razon=2) se toman todos los ítems de la factura y se anula.
-router.post('/', async (req, res) => {
+router.post('/', requireRole('admin'), async (req, res) => {
   const { factura_venta_id, notas } = req.body;
   let { razon, items, reingresa_inventario, bodega_id, anulacion } = req.body;
   razon = Number(razon);

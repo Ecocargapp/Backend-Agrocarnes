@@ -8,12 +8,15 @@ import { probarConexion as probarConexionFactus, registrarRango } from '../dian/
 
 export const router = Router();
 
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
+  // Un usuario que no es admin y tiene empresa asignada solo ve esa empresa.
+  const soloEmpresa = req.usuario?.rol !== 'admin' && req.usuario?.empresa_id ? req.usuario.empresa_id : null;
   const { rows } = await pool.query(
     `select id, nombre, nit, es_facturador_dian, prefijo_factura, proveedor_dian,
             (arco_config is not null and arco_config->>'host' is not null) as arco_configurada,
             (factus_config is not null and factus_config->>'client_id' is not null) as factus_configurada
-     from empresa order by nombre`
+     from empresa where $1::uuid is null or id = $1 order by nombre`,
+    [soloEmpresa]
   );
   res.json(rows);
 });

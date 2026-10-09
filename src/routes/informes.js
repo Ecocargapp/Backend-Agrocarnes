@@ -10,6 +10,14 @@ import { auxiliar, nombreNivel, NIVELES } from '../contabilidad/puc.js';
 
 export const router = Router();
 
+// El usuario de punto de venta (operador) solo ve la venta diaria; el resto
+// de informes contables es del administrador.
+const PARA_OPERADOR = new Set(['/venta-diaria']);
+router.use((req, res, next) => {
+  if (req.usuario?.rol === 'admin' || (req.method === 'GET' && PARA_OPERADOR.has(req.path))) return next();
+  res.status(403).json({ error: 'No tienes permiso para ver este informe' });
+});
+
 const r2 = (n) => Math.round(Number(n || 0) * 100) / 100;
 const hoy = () => new Date(Date.now() - 5 * 3600e3).toISOString().slice(0, 10); // America/Bogota
 

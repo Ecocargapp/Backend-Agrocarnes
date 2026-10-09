@@ -12,8 +12,8 @@ router.post('/login', async (req, res) => {
   }
 
   const { rows } = await pool.query(
-    'select id, empresa_id, nombre, email, password_hash, rol, activo from usuario where email = $1',
-    [email]
+    'select id, empresa_id, nombre, email, password_hash, rol, activo from usuario where lower(email) = lower($1)',
+    [String(email).trim()]
   );
   const usuario = rows[0];
   if (!usuario || !usuario.activo) {
