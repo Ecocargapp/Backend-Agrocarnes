@@ -19,8 +19,12 @@
 
 import { pool } from '../db/pool.js';
 import { cuentaDisponible } from './catalogos.js';
+import { auxiliar, clasificar, nombreNivel, cuentaRetefuente } from './puc.js';
 
 const r2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+// Tercero de las líneas sin NIT propio.
+const CONSUMIDOR_FINAL = { nit: '222222222222', nit_nombre: 'CONSUMIDOR FINAL' };
+const EMPRESA_PROPIA = { nit: '__empresa__' }; // se reemplaza por el NIT de la empresa del asiento
 
 // Cuenta contable de la caja/banco/tarjeta del pago; sin cuenta asignada
 // (registros anteriores) se usa la genérica según el medio.
@@ -32,26 +36,51 @@ async function cuentaDe(client, cuentaPagoId, medio) {
   return cuentaDisponible(medio);
 }
 
-async function guardarAsiento(client, { empresa_id, fecha, origen, origen_id, periodo = null, descripcion, lineas }) {
+// Crea el auxiliar de 8 dígitos en el plan de cuentas si todavía no existe.
+const cuentasExistentes = new Set();
+async function asegurarCuenta(client, codigo) {
+  if (cuentasExistentes.has(codigo)) return;
+  const { rows } = await client.query('select 1 from cuenta where codigo = $1', [codigo]);
+  if (!rows[0]) {
+    const { naturaleza, grupo } = clasificar(codigo);
+    await client.query(
+      'insert into cuenta (codigo, nombre, naturaleza, grupo) values ($1, $2, $3, $4) on conflict (codigo) do nothing',
+      [codigo, nombreNivel(codigo), naturaleza, grupo]
+    );
+  }
+  cuentasExistentes.add(codigo);
+}
+
+// Guarda (o reemplaza) el asiento de un documento. Cada línea se lleva a su
+// auxiliar de 8 dígitos; las líneas sin tercero toman el del documento
+// (`tercero_id`) o, si no es un tercero del sistema (p. ej. un trabajador),
+// el `nit` / `nit_nombre` que se indique.
+async function guardarAsiento(client, { empresa_id, fecha, origen, origen_id, periodo = null, descripcion, documento = null, tercero_id = null, nit = null, nit_nombre = null, lineas }) {
   await client.query(
     `delete from asiento where origen = $1 and origen_id = $2 and coalesce(periodo, '') = coalesce($3, '')`,
     [origen, origen_id, periodo]
   );
   const ls = lineas
-    .map((l) => ({ ...l, debito: r2(l.debito), credito: r2(l.credito) }))
+    .map((l) => ({ ...l, cuenta: auxiliar(l.cuenta), debito: r2(l.debito), credito: r2(l.credito) }))
     .filter((l) => l.debito > 0 || l.credito > 0);
   if (!ls.length) return null;
   const deb = r2(ls.reduce((a, l) => a + l.debito, 0));
   const cre = r2(ls.reduce((a, l) => a + l.credito, 0));
   if (Math.abs(deb - cre) > 0.009) throw new Error(`Asiento descuadrado (${origen} ${origen_id}): débitos ${deb} ≠ créditos ${cre}`);
+  if (nit === '__empresa__') {
+    const { rows: e } = await client.query('select nit, nombre from empresa where id = $1', [empresa_id]);
+    nit = e[0]?.nit || '0'; nit_nombre = (e[0]?.nombre || 'EMPRESA').toUpperCase();
+  }
   const { rows } = await client.query(
-    `insert into asiento (empresa_id, fecha, origen, origen_id, periodo, descripcion) values ($1, $2, $3, $4, $5, $6) returning id`,
-    [empresa_id, fecha, origen, origen_id, periodo, descripcion]
+    `insert into asiento (empresa_id, fecha, origen, origen_id, periodo, descripcion, documento) values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+    [empresa_id, fecha, origen, origen_id, periodo, descripcion, documento]
   );
   for (const l of ls) {
+    await asegurarCuenta(client, l.cuenta);
+    const tercero = l.tercero_id === undefined ? tercero_id : l.tercero_id;
     await client.query(
-      `insert into asiento_linea (asiento_id, cuenta, tercero_id, descripcion, debito, credito) values ($1, $2, $3, $4, $5, $6)`,
-      [rows[0].id, l.cuenta, l.tercero_id || null, l.descripcion || null, l.debito, l.credito]
+      `insert into asiento_linea (asiento_id, cuenta, tercero_id, descripcion, debito, credito, nit, nit_nombre) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [rows[0].id, l.cuenta, tercero || null, l.descripcion || null, l.debito, l.credito, tercero ? null : (l.nit ?? nit), tercero ? null : (l.nit_nombre ?? nit_nombre)]
     );
   }
   return rows[0].id;
@@ -104,6 +133,7 @@ export async function contabilizarVenta(client, id) {
   const desc = `Factura ${f.consecutivo}${f.venta_interna ? ' (venta interna)' : ''}`;
   await guardarAsiento(client, {
     empresa_id: f.empresa_id, fecha: f.dia, origen: 'factura_venta', origen_id: id, descripcion: desc,
+    documento: f.consecutivo, tercero_id: f.cliente_id, ...(f.cliente_id ? {} : CONSUMIDOR_FINAL),
     lineas: [
       { cuenta: '1305', tercero_id: f.cliente_id, debito: total },
       { cuenta: '4135', credito: base },
@@ -137,6 +167,7 @@ export async function contabilizarNotaCredito(client, id) {
   const reingreso = await costoMovimientos(client, 'nota_credito', id, ['devolucion_venta', 'anulacion_venta']);
   await guardarAsiento(client, {
     empresa_id: n.empresa_id, fecha: n.dia, origen: 'nota_credito', origen_id: id, descripcion: `Nota crédito ${n.consecutivo}`,
+    documento: n.consecutivo, tercero_id: n.cliente_id, ...(n.cliente_id ? {} : CONSUMIDOR_FINAL),
     lineas: [
       { cuenta: '4175', debito: base },
       { cuenta: '240801', debito: iva },
@@ -180,12 +211,13 @@ export async function contabilizarCompra(client, id) {
   }
   const debitos = r2(lineas.reduce((a, l) => a + r2(l.debito), 0));
   const ret = { f: r2(c.retefuente), i: r2(c.reteiva), c: r2(c.reteica) };
-  lineas.push({ cuenta: '2365', tercero_id: c.proveedor_id, credito: ret.f, descripcion: `Retención en la fuente (${c.concepto_retencion || ''})` });
+  lineas.push({ cuenta: cuentaRetefuente(c.concepto_retencion), tercero_id: c.proveedor_id, credito: ret.f, descripcion: `Retención en la fuente (${c.concepto_retencion || ''})` });
   lineas.push({ cuenta: '2367', tercero_id: c.proveedor_id, credito: ret.i, descripcion: 'Retención de IVA' });
   lineas.push({ cuenta: '2368', tercero_id: c.proveedor_id, credito: ret.c, descripcion: 'Retención de ICA' });
   lineas.push({ cuenta: esGasto ? '2335' : '2205', tercero_id: c.proveedor_id, credito: r2(debitos - ret.f - ret.i - ret.c) });
   await guardarAsiento(client, {
     empresa_id: c.empresa_id, fecha: c.fecha, origen: 'compra', origen_id: id,
+    documento: c.numero_factura_proveedor || `${esGasto ? 'G' : 'C'}-${String(id).slice(0, 6)}`, tercero_id: c.proveedor_id,
     descripcion: `${esGasto ? 'Gasto' : 'Compra'} ${c.numero_factura_proveedor || ''} ${c.descripcion || ''}`.trim(),
     lineas,
   });
@@ -208,6 +240,7 @@ export async function contabilizarRecibo(client, id) {
   const ret = { f: r2(r.retefuente), i: r2(r.reteiva), c: r2(r.reteica) };
   await guardarAsiento(client, {
     empresa_id: r.empresa_id, fecha: r.fecha, origen: 'recibo_caja', origen_id: id, descripcion: `Recibo de caja ${r.consecutivo} (${r.medio_pago})`,
+    documento: `RC${r.consecutivo}`, tercero_id: r.tercero_id, ...(r.tercero_id ? {} : CONSUMIDOR_FINAL),
     lineas: [
       { cuenta: cuentaR, debito: r2(aplicado - ret.f - ret.i - ret.c) },
       { cuenta: '135515', tercero_id: r.tercero_id, debito: ret.f, descripcion: 'Retención en la fuente que nos practicaron' },
@@ -232,7 +265,8 @@ export async function contabilizarPago(client, id) {
   const total = r2(ap.reduce((s, a) => s + Number(a.v), 0));
   lineas.push({ cuenta: await cuentaDe(client, p.cuenta_pago_id, p.medio_pago), credito: total, descripcion: p.referencia ? `Ref. ${p.referencia}` : null });
   await guardarAsiento(client, {
-    empresa_id: p.empresa_id, fecha: p.fecha, origen: 'pago_proveedor', origen_id: id, descripcion: `Comprobante de egreso ${p.consecutivo} (${p.medio_pago})`, lineas,
+    empresa_id: p.empresa_id, fecha: p.fecha, origen: 'pago_proveedor', origen_id: id, descripcion: `Comprobante de egreso ${p.consecutivo} (${p.medio_pago})`,
+    documento: `CE${p.consecutivo}`, tercero_id: p.tercero_id, lineas,
   });
 }
 
@@ -248,11 +282,11 @@ export async function contabilizarTraslado(client, id) {
   if (t.emp_origen === t.emp_destino) return borrar(client, 'traslado', id); // entre bodegas de la misma empresa: no hay asiento
   const valor = r2(Number(t.cantidad) * Number(t.costo_unitario));
   await guardarAsiento(client, {
-    empresa_id: t.emp_origen, fecha: t.dia, origen: 'traslado', origen_id: id, periodo: 'origen', descripcion: 'Traslado enviado a otro centro de costo',
+    empresa_id: t.emp_origen, fecha: t.dia, origen: 'traslado', origen_id: id, periodo: 'origen', descripcion: 'Traslado enviado a otro centro de costo', documento: `TR-${String(id).slice(0, 6)}`, ...EMPRESA_PROPIA,
     lineas: [{ cuenta: '2895', debito: valor }, { cuenta: '1435', credito: valor }],
   });
   await guardarAsiento(client, {
-    empresa_id: t.emp_destino, fecha: t.dia, origen: 'traslado', origen_id: id, periodo: 'destino', descripcion: 'Traslado recibido de otro centro de costo',
+    empresa_id: t.emp_destino, fecha: t.dia, origen: 'traslado', origen_id: id, periodo: 'destino', descripcion: 'Traslado recibido de otro centro de costo', documento: `TR-${String(id).slice(0, 6)}`, ...EMPRESA_PROPIA,
     lineas: [{ cuenta: '1435', debito: valor }, { cuenta: '2895', credito: valor }],
   });
 }
@@ -279,7 +313,7 @@ export async function generarDepreciaciones(client, hasta = new Date()) {
       const ultimoDia = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
       await guardarAsiento(client, {
         empresa_id: a.empresa_id, fecha: ultimoDia, origen: 'depreciacion', origen_id: a.id, periodo,
-        descripcion: `Depreciación ${periodo} · ${a.descripcion}`,
+        descripcion: `Depreciación ${periodo} · ${a.descripcion}`, documento: `DEP-${periodo}`, ...EMPRESA_PROPIA,
         lineas: [{ cuenta: '5160', debito: valor }, { cuenta: '1592', credito: valor }],
       });
       creados++;
@@ -324,6 +358,8 @@ export async function contabilizarNomina(client, id) {
   await guardarAsiento(client, {
     empresa_id: n.empresa_id, fecha: n.fecha_pago, origen: 'nomina', origen_id: id,
     descripcion: `Nómina ${periodo} · ${nombre}${n.numero ? ` · ${n.numero}` : ''}`, lineas,
+    documento: n.numero || `NOM-${String(id).slice(0, 6)}`, nit: n.empleado_snapshot.numero_documento,
+    nit_nombre: [n.empleado_snapshot.primer_nombre, n.empleado_snapshot.otros_nombres, n.empleado_snapshot.primer_apellido, n.empleado_snapshot.segundo_apellido].filter(Boolean).join(' ').toUpperCase(),
   });
 }
 
@@ -362,6 +398,17 @@ export async function reconstruirContabilidad() {
     await client.query('begin');
     await client.query(`select pg_advisory_xact_lock(4242)`);
     await client.query(`delete from asiento where origen <> 'manual'`);
+    // Los asientos manuales (aportes de capital) se pasan a auxiliares de 8 dígitos.
+    const { rows: manuales } = await client.query(
+      `select distinct l.cuenta from asiento_linea l join asiento a on a.id = l.asiento_id where a.origen = 'manual' and length(l.cuenta) <> 8`
+    );
+    for (const m of manuales) {
+      const aux = auxiliar(m.cuenta);
+      await asegurarCuenta(client, aux);
+      await client.query(
+        `update asiento_linea l set cuenta = $2 from asiento a where a.id = l.asiento_id and a.origen = 'manual' and l.cuenta = $1`, [m.cuenta, aux]
+      );
+    }
     const fuentes = {
       factura_venta: 'select id from factura_venta order by fecha',
       nota_credito: 'select id from nota_credito order by fecha',

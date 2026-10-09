@@ -35,9 +35,9 @@ router.post('/', requireRole('admin'), async (req, res) => {
   try {
     await client.query('begin');
     await client.query('select pg_advisory_xact_lock(4343)');
-    let cuenta = '110505';
+    let cuenta = '11050501';
     if (b.tipo === 'caja') {
-      // Cajas adicionales: 1105 + subcuenta propia (11050501…), la primera usa 110505.
+      // Cajas: auxiliares de la 110505; la caja general es 11050501 y las adicionales 11050502…
       const { rows } = await client.query(`select count(*)::int as n from cuenta_pago where tipo = 'caja' and empresa_id = $1`, [b.empresa_id]);
       if (rows[0].n > 0) {
         const { rows: m } = await client.query(`select coalesce(max(substring(codigo from 7)::int), 0) + 1 as n from cuenta where codigo ~ '^110505\\d{2}$'`);

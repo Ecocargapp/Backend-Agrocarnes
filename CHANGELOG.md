@@ -10,6 +10,25 @@ entrega del día).
 
 ---
 
+## 2026.10.09.1 — PUC a 8 dígitos, balance de prueba, libro auxiliar e inventario
+
+- Plan de cuentas con auxiliares de 8 dígitos (clase · grupo · cuenta ·
+  subcuenta · auxiliar, `src/contabilidad/puc.js`). Todos los asientos se
+  registran en auxiliares; la retención en la fuente por pagar se separa por
+  concepto (compras, servicios, honorarios, arrendamientos…). Migración
+  `014_puc_auxiliares.sql`: documento soporte en cada asiento, NIT en cada
+  línea (consumidor final, trabajadores, la propia empresa) y caja general en
+  11050501. "Reconstruir contabilidad" pasa todo lo anterior al nuevo plan.
+- Informes → **Balance de prueba** (saldo inicial, débitos, créditos y saldo
+  final por clase, grupo, cuenta, subcuenta y auxiliar, con "Fin División") y
+  **Libro auxiliar** clasificado por cuenta y NIT (fecha, documento, detalle,
+  concepto, centro de costo, debe, haber, saldo y total por NIT), con filtros
+  de cuenta y NIT, Excel e impresión.
+- Inventario: al anular una compra, la mercancía sale al costo con que entró
+  (antes salía al costo promedio y dejaba mal valorado lo que quedaba).
+  `scripts/recalcular-inventario.js` corrige las existencias reproduciendo los
+  movimientos.
+
 ## 2026.10.06.3 — Nómina electrónica con Factus
 
 - Backend (migración `013_nomina.sql`): trabajadores (`empleado`), nóminas por

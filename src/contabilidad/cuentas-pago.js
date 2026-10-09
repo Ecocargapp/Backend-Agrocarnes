@@ -19,10 +19,10 @@ export const MEDIOS_PAGO = {
 
 // Siguiente subcuenta libre: bancos 111005NN, tarjetas 210510NN.
 export async function siguienteCuentaContable(client, tipo) {
-  if (tipo === 'caja') return '110505';
+  if (tipo === 'caja') return '11050501';
   const prefijo = tipo === 'banco' ? '111005' : '210510';
   const { rows } = await client.query(
-    `select coalesce(max(substring(codigo from 7)::int), 0) + 1 as n from cuenta where codigo ~ $1`, [`^${prefijo}\\d{2}$`]
+    `select coalesce(max(substring(codigo from 7)::int), 0) + 1 as n from cuenta where codigo ~ $1 and substring(codigo from 7) <> '99'`, [`^${prefijo}\\d{2}$`]
   );
   return `${prefijo}${String(rows[0].n).padStart(2, '0')}`;
 }

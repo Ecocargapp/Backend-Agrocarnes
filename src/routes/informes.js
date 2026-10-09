@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireRole } from '../middleware/auth.js';
 import { reconstruirContabilidad, depreciacionAlDia } from '../contabilidad/contabilizar.js';
+import { auxiliar, nombreNivel, NIVELES } from '../contabilidad/puc.js';
 
 export const router = Router();
 
@@ -25,8 +26,10 @@ async function saldos(empresaId, desde, hasta) {
   );
   return Object.fromEntries(rows.map((r) => [r.codigo, { ...r, debito: Number(r.debito), credito: Number(r.credito) }]));
 }
-const deb = (s, c) => r2((s[c]?.debito || 0) - (s[c]?.credito || 0)); // saldo de naturaleza débito
-const cre = (s, c) => r2((s[c]?.credito || 0) - (s[c]?.debito || 0)); // saldo de naturaleza crédito
+// Saldo de una cuenta de cualquier nivel (suma sus auxiliares de 8 dígitos).
+const sumaPrefijo = (s, c, campo) => Object.values(s).reduce((a, x) => a + (x.codigo.startsWith(c) ? x[campo] : 0), 0);
+const deb = (s, c) => r2(sumaPrefijo(s, c, 'debito') - sumaPrefijo(s, c, 'credito')); // saldo de naturaleza débito
+const cre = (s, c) => r2(sumaPrefijo(s, c, 'credito') - sumaPrefijo(s, c, 'debito')); // saldo de naturaleza crédito
 const lineasGrupo = (s, grupo, fn) => Object.values(s).filter((c) => c.grupo === grupo)
   .map((c) => ({ cuenta: c.codigo, nombre: c.nombre, valor: fn(s, c.codigo) })).filter((l) => l.valor !== 0);
 const suma = (ls) => r2(ls.reduce((a, l) => a + l.valor, 0));
@@ -223,6 +226,107 @@ router.get('/venta-diaria', async (req, res) => {
   res.json({ desde: params[0], hasta, dias, totales });
 });
 
+
+// ------------------------------------------------------------ balance de prueba
+// Estructura: clase (1) · grupo (2) · cuenta (4) · subcuenta (6) · auxiliar (8),
+// con saldo inicial, débitos, créditos y saldo final (débitos − créditos: las
+// cuentas de naturaleza crédito salen negativas).
+// query: empresa_id, desde, hasta, nivel (2|4|6|8, por defecto 8), cuenta (prefijo)
+router.get('/balance-prueba', async (req, res) => {
+  await prepararse();
+  const { empresa_id } = req.query;
+  const hasta = req.query.hasta || hoy();
+  const desde = req.query.desde || `${hasta.slice(0, 4)}-01-01`;
+  const nivelMax = [1, 2, 4, 6, 8].includes(Number(req.query.nivel)) ? Number(req.query.nivel) : 8;
+  const prefijo = String(req.query.cuenta || '').replace(/\D/g, '');
+  const params = [desde, hasta];
+  let we = '';
+  if (empresa_id) { params.push(empresa_id); we = `and a.empresa_id = $${params.length}`; }
+  const { rows } = await pool.query(
+    `select l.cuenta, c.nombre,
+            coalesce(sum(l.debito - l.credito) filter (where a.fecha < $1), 0) as inicial,
+            coalesce(sum(l.debito) filter (where a.fecha between $1 and $2), 0) as debitos,
+            coalesce(sum(l.credito) filter (where a.fecha between $1 and $2), 0) as creditos
+     from asiento_linea l join asiento a on a.id = l.asiento_id join cuenta c on c.codigo = l.cuenta
+     where a.fecha <= $2 ${we} group by l.cuenta, c.nombre`, params
+  );
+  const mapa = new Map();
+  for (const r of rows) {
+    const aux = auxiliar(r.cuenta);
+    if (prefijo && !aux.startsWith(prefijo)) continue;
+    for (const n of NIVELES) {
+      if (n > nivelMax) break;
+      const codigo = aux.slice(0, n);
+      const x = mapa.get(codigo) || { codigo, nivel: n, nombre: nombreNivel(codigo, n === 8 ? r.nombre : null), saldo_inicial: 0, debitos: 0, creditos: 0 };
+      x.saldo_inicial += Number(r.inicial); x.debitos += Number(r.debitos); x.creditos += Number(r.creditos);
+      mapa.set(codigo, x);
+    }
+  }
+  const cuentas = [...mapa.values()]
+    .map((x) => ({ ...x, saldo_inicial: r2(x.saldo_inicial), debitos: r2(x.debitos), creditos: r2(x.creditos), saldo_final: r2(x.saldo_inicial + x.debitos - x.creditos) }))
+    .filter((x) => x.saldo_inicial || x.debitos || x.creditos || x.saldo_final)
+    .sort((a, b) => (a.codigo < b.codigo ? -1 : 1));
+  const clases = cuentas.filter((x) => x.nivel === 1);
+  const tot = (k) => r2(clases.reduce((a, x) => a + x[k], 0));
+  res.json({
+    desde, hasta, nivel: nivelMax, cuentas,
+    totales: { saldo_inicial: tot('saldo_inicial'), debitos: tot('debitos'), creditos: tot('creditos'), saldo_final: tot('saldo_final') },
+  });
+});
+
+// ------------------------------------------- libro auxiliar por cuenta y NIT
+// "Listado de movimientos clasificado por cuenta y NIT": por cada auxiliar, sus
+// terceros con saldo inicial, cada movimiento (fecha, documento, detalle,
+// concepto, centro de costo, debe, haber, saldo) y el total del NIT.
+// query: empresa_id, desde, hasta, cuenta (prefijo), nit
+router.get('/auxiliar', async (req, res) => {
+  const { empresa_id } = req.query;
+  const hasta = req.query.hasta || hoy();
+  const desde = req.query.desde || `${hasta.slice(0, 4)}-01-01`;
+  const prefijo = String(req.query.cuenta || '').replace(/\D/g, '');
+  const nitFiltro = String(req.query.nit || '').trim();
+  const params = [hasta];
+  let we = '';
+  if (empresa_id) { params.push(empresa_id); we = `and a.empresa_id = $${params.length}`; }
+  const { rows } = await pool.query(
+    `select a.fecha, a.documento, a.origen, a.descripcion as detalle, l.descripcion as concepto, e.nombre as centro_costo,
+            l.cuenta, c.nombre as cuenta_nombre, l.debito, l.credito,
+            coalesce(t.numero_documento, l.nit, 'SIN NIT') as nit, upper(coalesce(t.nombre, l.nit_nombre, 'SIN TERCERO')) as nit_nombre
+     from asiento a join asiento_linea l on l.asiento_id = a.id join cuenta c on c.codigo = l.cuenta
+     join empresa e on e.id = a.empresa_id left join tercero t on t.id = l.tercero_id
+     where a.fecha <= $1 ${we}
+     order by a.fecha, a.creado_en, a.id`, params
+  );
+  const cuentas = new Map();
+  for (const r of rows) {
+    const aux = auxiliar(r.cuenta);
+    if (prefijo && !aux.startsWith(prefijo)) continue;
+    if (nitFiltro && !String(r.nit).includes(nitFiltro)) continue;
+    if (!cuentas.has(aux)) cuentas.set(aux, { codigo: aux, nombre: nombreNivel(aux, r.cuenta === aux ? r.cuenta_nombre : null), terceros: new Map() });
+    const cu = cuentas.get(aux);
+    if (!cu.terceros.has(r.nit)) cu.terceros.set(r.nit, { nit: r.nit, nombre: r.nit_nombre, saldo_inicial: 0, movimientos: [], total_debe: 0, total_haber: 0 });
+    const te = cu.terceros.get(r.nit);
+    const fecha = r.fecha instanceof Date ? r.fecha.toISOString().slice(0, 10) : String(r.fecha).slice(0, 10);
+    const d = Number(r.debito); const h = Number(r.credito);
+    if (fecha < desde) { te.saldo_inicial += d - h; continue; }
+    te.total_debe += d; te.total_haber += h;
+    te.movimientos.push({ fecha, documento: r.documento || r.origen, detalle: r.detalle, concepto: r.concepto, centro_costo: r.centro_costo, debe: r2(d), haber: r2(h) });
+  }
+  const salida = [...cuentas.values()].sort((a, b) => (a.codigo < b.codigo ? -1 : 1)).map((cu) => {
+    const terceros = [...cu.terceros.values()]
+      .filter((t) => t.movimientos.length || Math.abs(t.saldo_inicial) > 0.004)
+      .sort((a, b) => String(a.nit).localeCompare(String(b.nit)))
+      .map((t) => {
+        let saldo = t.saldo_inicial;
+        const movimientos = t.movimientos.map((m) => { saldo += m.debe - m.haber; return { ...m, saldo: r2(saldo) }; });
+        return { nit: t.nit, nombre: t.nombre, saldo_inicial: r2(t.saldo_inicial), movimientos, total_debe: r2(t.total_debe), total_haber: r2(t.total_haber), saldo_final: r2(saldo) };
+      });
+    const s = (k) => r2(terceros.reduce((a, t) => a + t[k], 0));
+    return { codigo: cu.codigo, nombre: cu.nombre, terceros, saldo_inicial: s('saldo_inicial'), total_debe: s('total_debe'), total_haber: s('total_haber'), saldo_final: s('saldo_final') };
+  }).filter((c) => c.terceros.length);
+  res.json({ desde, hasta, cuentas: salida });
+});
+
 // ------------------------------------------------------------------ libro diario
 router.get('/libro-diario', async (req, res) => {
   const { empresa_id, desde } = req.query;
@@ -253,8 +357,12 @@ router.post('/aporte-capital', requireRole('admin'), async (req, res) => {
       `insert into asiento (empresa_id, fecha, origen, descripcion, creado_por) values ($1, coalesce($2, current_date), 'manual', $3, $4) returning id`,
       [empresa_id, fecha || null, `Aporte de capital${socio ? ` · ${socio}` : ''}`, req.usuario?.sub]
     );
-    await client.query(`insert into asiento_linea (asiento_id, cuenta, debito, credito) values ($1, $2, $3, 0), ($1, '3115', 0, $3)`,
-      [rows[0].id, medio === 'efectivo' ? '1105' : '1110', v]);
+    for (const c of ['11050501', '11100599', '31150501']) {
+      await client.query(`insert into cuenta (codigo, nombre, naturaleza, grupo) values ($1, $2, $3, $4) on conflict (codigo) do nothing`,
+        [c, nombreNivel(c), c.startsWith('3') ? 'credito' : 'debito', c.startsWith('3') ? 'patrimonio' : 'activo_corriente']);
+    }
+    await client.query(`insert into asiento_linea (asiento_id, cuenta, debito, credito, nit, nit_nombre) values ($1, $2, $3, 0, $4, $5), ($1, '31150501', 0, $3, $4, $5)`,
+      [rows[0].id, medio === 'efectivo' ? '11050501' : '11100599', v, socio ? null : '0', socio ? String(socio).toUpperCase() : 'SOCIOS']);
     await client.query('commit');
     res.status(201).json({ id: rows[0].id });
   } catch (err) {
