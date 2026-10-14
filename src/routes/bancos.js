@@ -13,7 +13,8 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { contabilizar } from '../contabilidad/contabilizar.js';
 import { auxiliar } from '../contabilidad/puc.js';
-import { textoDe, leerExtracto, conHuellas, clasificar, CLASES } from '../bancos/extracto.js';
+import { CLASES } from '../bancos/extracto.js';
+import { importarExtracto } from '../bancos/importar.js';
 import { conciliarCuenta, cuentasDelBanco, librosSinConciliar } from '../bancos/conciliar.js';
 
 export const router = Router();
@@ -48,50 +49,12 @@ const ymd = (v) => (v instanceof Date
 router.post('/extractos', async (req, res) => {
   const { cuenta_pago_id, archivo, contenido_base64, saldo_final } = req.body || {};
   if (!cuenta_pago_id || !contenido_base64) return res.status(400).json({ error: 'Elige la cuenta bancaria y el archivo del extracto' });
-  let leido;
   try {
-    leido = leerExtracto(textoDe(Buffer.from(String(contenido_base64), 'base64')));
+    res.status(201).json(await importarExtracto({
+      cuenta_pago_id, archivo, buffer: Buffer.from(String(contenido_base64), 'base64'), saldo_final, usuario: req.usuario?.sub || null,
+    }));
   } catch (err) {
-    return res.status(400).json({ error: err.message });
-  }
-  const movs = conHuellas(leido.movimientos);
-  const client = await pool.connect();
-  let extractoId;
-  try {
-    await client.query('begin');
-    const { cuenta } = await cuentasDelBanco(client, cuenta_pago_id);
-    if (cuenta.numero && leido.cuenta_banco) {
-      const solo = (s) => String(s).replace(/\D/g, '').replace(/^0+/, '');
-      if (solo(cuenta.numero) && solo(leido.cuenta_banco) && !solo(leido.cuenta_banco).endsWith(solo(cuenta.numero)) && !solo(cuenta.numero).endsWith(solo(leido.cuenta_banco))) {
-        throw new Error(`El extracto es de la cuenta ${leido.cuenta_banco} y elegiste ${cuenta.nombre} (${cuenta.numero})`);
-      }
-    }
-    const fechas = movs.map((m) => m.fecha).sort();
-    const { rows } = await client.query(
-      `insert into extracto_bancario (empresa_id, cuenta_pago_id, archivo, cuenta_banco, desde, hasta, saldo_final, movimientos, creado_por)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
-      [cuenta.empresa_id, cuenta.id, archivo || null, leido.cuenta_banco, fechas[0], fechas[fechas.length - 1],
-        saldo_final === '' || saldo_final == null ? null : Number(saldo_final), movs.length, req.usuario?.sub || null]
-    );
-    extractoId = rows[0].id;
-    let nuevos = 0;
-    for (const m of movs) {
-      const r = await client.query(
-        `insert into movimiento_bancario (extracto_id, empresa_id, cuenta_pago_id, fecha, valor, codigo, descripcion, huella, clase)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9) on conflict (cuenta_pago_id, huella) do nothing`,
-        [extractoId, cuenta.empresa_id, cuenta.id, m.fecha, m.valor, m.codigo, m.descripcion, m.huella, clasificar(m)]
-      );
-      nuevos += r.rowCount;
-    }
-    await client.query('update extracto_bancario set nuevos = $2 where id = $1', [extractoId, nuevos]);
-    await client.query('commit');
-    const resumen = await conciliarCuenta(cuenta.id, req.usuario?.sub || null);
-    res.status(201).json({ id: extractoId, formato: leido.formato, cuenta_banco: leido.cuenta_banco, desde: fechas[0], hasta: fechas[fechas.length - 1], movimientos: movs.length, nuevos, repetidos: movs.length - nuevos, ...resumen });
-  } catch (err) {
-    await client.query('rollback').catch(() => {});
     res.status(400).json({ error: err.message });
-  } finally {
-    client.release();
   }
 });
 
