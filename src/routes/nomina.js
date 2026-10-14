@@ -9,8 +9,15 @@ import { contabilizar } from '../contabilidad/contabilizar.js';
 import { resolverCuentaPago } from '../contabilidad/cuentas-pago.js';
 import { configPublica } from '../dian/factus.js';
 import {
-  enviarNomina, eliminarNominaDian, pdfNomina, probarConexionNomina, crearRangoNomina, configNomina,
+  enviarNomina, eliminarNominaDian, pdfNomina, probarConexionNomina, crearRangoNomina, configNomina, grupoMensual,
 } from '../dian/nomina-factus.js';
+
+// Recontabiliza las nóminas que quedaron con un número DIAN (con pago
+// quincenal, las dos quincenas comparten el documento mensual).
+async function contabilizarConNumero(numero, idPorDefecto) {
+  const { rows } = await pool.query('select id from nomina where numero = $1', [numero]);
+  for (const r of rows.length ? rows : [{ id: idPorDefecto }]) await contabilizar('nomina', r.id);
+}
 
 export const router = Router();
 
@@ -156,7 +163,7 @@ router.post('/', requireRole('admin'), async (req, res) => {
   }
   await contabilizar('nomina', id);
   const dian = b.enviar === false ? null : await enviarNomina(id);
-  if (dian?.numero) await contabilizar('nomina', id); // la descripción del asiento lleva el número
+  if (dian?.numero) await contabilizarConNumero(dian.numero, id); // la descripción del asiento lleva el número
   res.status(201).json({ id, dian });
 });
 
@@ -190,7 +197,7 @@ router.get('/:id', async (req, res) => {
 router.post('/:id/dian', requireRole('admin'), async (req, res) => {
   try {
     const r = await enviarNomina(req.params.id);
-    if (r.numero) await contabilizar('nomina', req.params.id);
+    if (r.numero) await contabilizarConNumero(r.numero, req.params.id);
     res.json(r);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -223,6 +230,19 @@ router.post('/:id/anular', requireRole('admin'), async (req, res) => {
       `update nomina set estado = 'anulado', anulado_en = now(), anulado_por = $2, motivo_anulacion = $3, ajuste_numero = $4, ajuste_cune = $5 where id = $1`,
       [n.id, req.usuario?.sub, motivo, ajuste?.numero || null, ajuste?.cune || null]
     );
+    // Pago quincenal: el documento mensual eliminado incluía la otra quincena,
+    // que queda pendiente de reportar en un nuevo documento mensual.
+    if (String(n.periodo) === '4') {
+      const g = await grupoMensual(n);
+      const otras = g.quincenas.filter((q) => q.id !== n.id).map((q) => q.id);
+      if (otras.length) {
+        await pool.query(
+          `update nomina set cune = null, numero = null, qr = null, referencia_envio = null, dian_intentos = 0, estado_dian = 'pendiente',
+                  dian_mensaje = $2 where id = any($1)`,
+          [otras, ajuste ? `El documento mensual ${n.numero} se eliminó con la nota de ajuste ${ajuste.numero || ''} al anular la otra quincena. Vuelve a liquidar esa quincena para reportar el mes.` : 'Vuelve a liquidar la quincena anulada para reportar el mes a la DIAN.']
+        );
+      }
+    }
     await pool.query(
       `insert into anulacion (documento, documento_id, empresa_id, descripcion, motivo, detalle, usuario_id) values ('nomina', $1, $2, $3, $4, $5, $6)`,
       [n.id, n.empresa_id, `Nómina ${n.numero || ''} ${n.anio}-${String(n.mes).padStart(2, '0')} · ${n.empleado_snapshot.primer_nombre} ${n.empleado_snapshot.primer_apellido}`.replace(/\s+/g, ' '),

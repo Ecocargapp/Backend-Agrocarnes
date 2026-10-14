@@ -104,7 +104,9 @@ export function armarNomina(n, cfg = {}) {
     numbering_range_id: cfg.numbering_range_id_nomina || undefined,
     settlement_period: {
       month: String(n.mes), year: String(n.anio), payroll_period_code: String(n.periodo),
-      pay_period_half: String(n.periodo) === '4' ? (n.quincena === '2nd' ? 2 : 1) : undefined, // Factus exige entero (1 o 2), no '1st'/'2nd'
+      // Con pago quincenal el documento es MENSUAL (consolidado): no lleva quincena.
+      // Solo un envío suelto de una quincena (n.consolidado = false) la indica (Factus exige entero 1 o 2).
+      pay_period_half: String(n.periodo) === '4' && n.consolidado === false ? (n.quincena === '2nd' ? 2 : 1) : undefined,
     },
     payment: {
       payment_method_code: medio,
@@ -148,6 +150,70 @@ function limpiar(v) {
   return v;
 }
 
+// ---------------------------------------------------------------- pago quincenal
+// La DIAN exige UN documento soporte de nómina por trabajador y por MES, aunque
+// se pague por quincenas (Res. 000013 de 2021, art. 3), transmitido dentro de
+// los 10 primeros días del mes siguiente. Cada quincena se liquida, paga y
+// contabiliza por separado; al reportar se suman en un solo documento.
+
+const SUMABLES = new Set(['suel', 'tra', 'prim', 'cesa', 'comi', 'boni', 'auxi', 'salu', 'pens', 'dedu', 'sind', 'pevo', 'rete', 'afco']);
+
+function sumarConceptos(listas) {
+  const out = [];
+  const idx = new Map();
+  for (const lista of listas) {
+    for (const x of lista || []) {
+      if (!SUMABLES.has(x.clave)) { out.push({ ...x }); continue; }
+      const k = `${x.clave}|${x.codigo}`;
+      const y = idx.get(k);
+      if (!y) { const c = { ...x }; idx.set(k, c); out.push(c); continue; }
+      y.valor = Number(y.valor || 0) + Number(x.valor || 0);
+      if (x.cantidad != null) y.cantidad = Number(y.cantidad || 0) + Number(x.cantidad || 0);
+      if (x.porcentaje != null) y.porcentaje = Math.max(Number(y.porcentaje || 0), Number(x.porcentaje));
+    }
+  }
+  return out;
+}
+
+// Une las liquidaciones de las quincenas de un mes en una sola.
+export function consolidarLiquidaciones(ls) {
+  const devengados = sumarConceptos(ls.map((l) => l.devengados));
+  const deducciones = sumarConceptos(ls.map((l) => l.deducciones));
+  const total = (arr) => arr.reduce((a, x) => a + Number(x.valor || 0), 0);
+  return {
+    ...ls[ls.length - 1],
+    dias_trabajados: ls.reduce((a, l) => a + Number(l.dias_trabajados || 0), 0),
+    dias_laborados: ls.reduce((a, l) => a + Number(l.dias_laborados || 0), 0),
+    devengados,
+    deducciones,
+    total_devengado: total(devengados),
+    total_deducciones: total(deducciones),
+    neto: total(devengados) - total(deducciones),
+  };
+}
+
+const ultimoDia = (anio, mes) => new Date(Date.UTC(anio, mes, 0)).getUTCDate();
+
+// Quincenas vigentes del mismo trabajador y mes, y si ya están todas las que
+// corresponden (las dos, o solo una si ingresó o se retiró a mitad de mes).
+export async function grupoMensual(n, db = pool) {
+  const { rows } = await db.query(
+    `select n.*, e.nombre as empresa_nombre from nomina n join empresa e on e.id = n.empresa_id
+     where n.empleado_id = $1 and n.anio = $2 and n.mes = $3 and n.periodo = '4' and n.estado = 'vigente'
+     order by n.quincena`, [n.empleado_id, n.anio, n.mes]
+  );
+  const m = `${n.anio}-${String(n.mes).padStart(2, '0')}`;
+  const e = n.empleado_snapshot || {};
+  const ingreso = String(e.fecha_ingreso || '').slice(0, 10);
+  const retiro = e.fecha_retiro ? String(e.fecha_retiro).slice(0, 10) : null;
+  const necesita = [];
+  if (!(ingreso > `${m}-15`) && !(retiro && retiro < `${m}-01`)) necesita.push('1st');
+  if (!(retiro && retiro <= `${m}-15`) && !(ingreso > `${m}-${ultimoDia(n.anio, n.mes)}`)) necesita.push('2nd');
+  const tiene = new Set(rows.map((r) => r.quincena));
+  const faltan = necesita.filter((q) => !tiene.has(q));
+  return { quincenas: rows, completo: faltan.length === 0, faltan };
+}
+
 async function cargar(id) {
   const { rows } = await pool.query('select n.*, e.nombre as empresa_nombre from nomina n join empresa e on e.id = n.empresa_id where n.id = $1', [id]);
   if (!rows[0]) throw new Error('Nómina no encontrada');
@@ -160,14 +226,51 @@ async function marcar(id, estado, extra = {}) {
   await pool.query(`update nomina set ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')} where id = $1`, [id, ...keys.map((k) => campos[k])]);
 }
 
-// Envía (o reenvía) una nómina a la DIAN a través de Factus.
+// Envía (o reenvía) una nómina a la DIAN a través de Factus. Si el trabajador
+// se paga por quincenas, envía el documento MENSUAL con todas las quincenas.
 export async function enviarNomina(id) {
-  const n = await cargar(id);
-  if (n.estado === 'anulado') throw new Error('La nómina está anulada');
-  if (n.cune) return { estado: 'aceptada', numero: n.numero, cune: n.cune };
+  const n0 = await cargar(id);
+  if (n0.estado === 'anulado') throw new Error('La nómina está anulada');
+  if (n0.cune) return { estado: 'aceptada', numero: n0.numero, cune: n0.cune };
+  if (String(n0.periodo) !== '4') return enviarDocumento(n0, [n0]);
+  const g = await grupoMensual(n0);
+  if (!g.completo) {
+    const nombres = g.faltan.map((q) => (q === '1st' ? 'primera' : 'segunda')).join(' y ');
+    const mensaje = `Pago quincenal: se reporta a la DIAN un solo documento por mes. Falta liquidar la ${nombres} quincena.`;
+    await pool.query(`update nomina set estado_dian = 'pendiente', dian_mensaje = $2 where id = any($1)`, [g.quincenas.map((q) => q.id), mensaje]);
+    return { estado: 'pendiente', mensaje };
+  }
+  const yaAceptada = g.quincenas.find((q) => q.cune);
+  if (yaAceptada) return { estado: 'aceptada', numero: yaAceptada.numero, cune: yaAceptada.cune };
+  // El documento mensual se guarda en la última quincena (la "principal").
+  const principal = g.quincenas[g.quincenas.length - 1];
+  const consolidado = {
+    ...principal,
+    consolidado: true,
+    liquidacion: consolidarLiquidaciones(g.quincenas.map((q) => q.liquidacion)),
+    observacion: principal.observacion || `Nómina de ${String(n0.mes).padStart(2, '0')}/${n0.anio} pagada por quincenas`,
+  };
+  return enviarDocumento(consolidado, g.quincenas);
+}
+
+// Envía un documento (mensual, o consolidado de quincenas) y marca el resultado
+// en todas las nóminas que lo componen.
+async function enviarDocumento(n, partes) {
+  const id = n.id;
+  const ids = partes.map((p) => p.id);
+  const marcarTodas = async (estado, extra = {}) => {
+    await marcar(id, estado, extra);
+    const otras = ids.filter((x) => x !== id);
+    if (otras.length) {
+      const { dian_intentos: _i, ...resto } = extra;
+      const campos = { estado_dian: estado, dian_fecha: new Date(), ...resto };
+      const keys = Object.keys(campos);
+      await pool.query(`update nomina set ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')} where id = any($1)`, [otras, ...keys.map((k) => campos[k])]);
+    }
+  };
   const cfg = await configNomina(n.empresa_id);
   if (!cfg) {
-    await marcar(id, 'sin_configurar', { dian_mensaje: `${n.empresa_nombre} no tiene configurada la cuenta de Factus para nómina` });
+    await marcarTodas('sin_configurar', { dian_mensaje: `${n.empresa_nombre} no tiene configurada la cuenta de Factus para nómina` });
     return { estado: 'sin_configurar' };
   }
   // Un reenvío después de un rechazo necesita un reference_code nuevo.
@@ -179,18 +282,29 @@ export async function enviarNomina(id) {
   try {
     const factus = new FactusClient(cfg);
     const body = armarNomina({ ...n, referencia_envio: referencia }, cfg);
-    const r = await factus.post('v2/payrolls', body);
+    let r;
+    try {
+      r = await factus.post('v2/payrolls', body);
+    } catch (e) {
+      // Si Factus solo acepta el periodo quincenal con una quincena específica,
+      // el documento mensual consolidado se reporta con periodo mensual (5),
+      // que cubre del 1 al último día del mes. Un 422 no llega a la DIAN.
+      const errores = JSON.stringify(e?.body || {});
+      if (!(n.consolidado && e instanceof FactusError && e.status === 422 && /pay_period_half/.test(errores))) throw e;
+      body.settlement_period = { ...body.settlement_period, payroll_period_code: '5' };
+      r = await factus.post('v2/payrolls', body);
+    }
     const d = r?.data || {};
     if (!d.number) throw new Error(`Factus no devolvió el número de la nómina: ${JSON.stringify(r).slice(0, 300)}`);
     const aceptada = Boolean(d.cune) && d.is_validated !== false;
-    await marcar(id, aceptada ? 'aceptada' : 'rechazada', {
+    await marcarTodas(aceptada ? 'aceptada' : 'rechazada', {
       numero: d.number, cune: d.cune || null, qr: d.qr || null, dian_mensaje: textoErrores(d.errors), dian_intentos: intento + 1,
     });
     return { estado: aceptada ? 'aceptada' : 'rechazada', numero: d.number, cune: d.cune, mensaje: textoErrores(d.errors) };
   } catch (err) {
     const rechazo = err instanceof FactusError && err.status >= 400 && err.status < 500 && ![401, 409, 429].includes(err.status); // 409 = pendiente en Factus: se reintenta igual
     const mensaje = err instanceof FactusError ? (textoErrores(err.body?.data?.errors || err.body?.errors) || err.message) : err.message;
-    await marcar(id, rechazo ? 'rechazada' : 'error', { dian_mensaje: String(mensaje).slice(0, 2000), dian_intentos: intento + 1 });
+    await marcarTodas(rechazo ? 'rechazada' : 'error', { dian_mensaje: String(mensaje).slice(0, 2000), dian_intentos: intento + 1 });
     return { estado: rechazo ? 'rechazada' : 'error', mensaje };
   }
 }

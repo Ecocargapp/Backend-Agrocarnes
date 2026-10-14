@@ -10,6 +10,22 @@ entrega del día).
 
 ---
 
+## 2026.10.14.1 — Nómina quincenal y facturas sin impuesto en Factus
+
+- **Nómina quincenal**: los trabajadores se pagan por quincenas por defecto
+  (los existentes pasan a quincenal). Cada quincena se liquida, paga y
+  contabiliza por separado; ante la DIAN se reporta **un solo documento por
+  trabajador y por mes** (Res. 000013 de 2021, art. 3) que suma las dos
+  quincenas y se envía al liquidar la segunda. Si se anula una quincena ya
+  reportada, se emite la nota de ajuste de eliminación del documento mensual
+  y la otra quincena queda pendiente de reenviar.
+- **Factus facturas y notas crédito**: los productos sin impuesto (carne
+  fresca, exenta) se envían con IVA 0 %; Factus rechazaba la factura porque
+  exige `items.taxes`.
+- Usuarios y rol "Punto de venta" (entrega del 2026-10-09).
+- Migración: `015_nomina_quincenal.sql`.
+
+
 ## 2026.10.09.1 — PUC a 8 dígitos, balance de prueba, libro auxiliar e inventario
 
 - Plan de cuentas con auxiliares de 8 dígitos (clase · grupo · cuenta ·
