@@ -93,7 +93,9 @@ function armarItems(f) {
       price: (Math.round(base * 100) / 100).toFixed(2),
       unit_measure_code: unidad,
       standard_code: i.factus_estandar_code || '999',
-      taxes: pct > 0 ? [{ code: codigoImpuesto(i.tipo_impuesto), rate: pct.toFixed(2) }] : [],
+      // Factus exige al menos un impuesto por ítem: los productos sin impuesto
+      // (carne fresca, exenta) van con IVA 0 %.
+      taxes: [pct > 0 ? { code: codigoImpuesto(i.tipo_impuesto), rate: pct.toFixed(2) } : { code: '01', rate: '0.00' }],
     };
   });
 }
