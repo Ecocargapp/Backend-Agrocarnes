@@ -10,6 +10,22 @@ entrega del día).
 
 ---
 
+## 2026.10.14.3 — Formulación y producción (hamburguesa, chorizos)
+
+- Fórmulas por tanda: "para 10 kg de producto uso estos insumos", con notas,
+  resumen de kg de insumos, rendimiento y cantidad por unidad. Se puede borrar
+  una fórmula.
+- Producir: el sistema propone los insumos según la fórmula, muestra la
+  existencia y el costo de cada uno en la bodega, y deja ajustar la cantidad
+  real usada. Al registrar descarga del inventario los insumos y carga el
+  producto terminado al costo de lo consumido. Lleva fecha, lote y notas.
+- Si falta inventario, el mensaje dice qué insumo, cuánto se necesita y cuánto
+  hay. Detalle de cada producción con fórmula vs. real.
+- Factus: fecha de vencimiento AAAA-MM-DD en facturas a crédito; cantidades
+  con 3 decimales y total del pago igual al que calcula Factus.
+- Migración: `017_formulas_por_tanda.sql`.
+
+
 ## 2026.10.14.2 — Conciliación bancaria
 
 - Nuevo módulo **Bancos → Conciliación bancaria** (solo administrador): se carga
