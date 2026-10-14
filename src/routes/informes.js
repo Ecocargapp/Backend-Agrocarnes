@@ -12,7 +12,7 @@ export const router = Router();
 
 // El usuario de punto de venta (operador) solo ve la venta diaria; el resto
 // de informes contables es del administrador.
-const PARA_OPERADOR = new Set(['/venta-diaria']);
+const PARA_OPERADOR = new Set(['/venta-diaria', '/ventas-cliente']);
 router.use((req, res, next) => {
   if (req.usuario?.rol === 'admin' || (req.method === 'GET' && PARA_OPERADOR.has(req.path))) return next();
   res.status(403).json({ error: 'No tienes permiso para ver este informe' });
@@ -190,6 +190,48 @@ router.get('/retenciones', async (req, res) => {
 });
 
 // ------------------------------------------------------------------ venta diaria
+// Ventas por día y por cliente: cuánto le vendimos a cada cliente cada día,
+// de contado o a crédito, y lo que todavía debe de esas facturas.
+router.get('/ventas-cliente', async (req, res) => {
+  const { empresa_id, desde, cliente } = req.query;
+  const hasta = req.query.hasta || hoy();
+  const params = [desde || hasta, hasta];
+  let w = '';
+  if (empresa_id) { params.push(empresa_id); w += ` and f.empresa_id = $${params.length}`; }
+  if (cliente) { params.push(`%${cliente}%`); w += ` and (coalesce(t.nombre, 'Consumidor final') ilike $${params.length} or t.numero_documento ilike $${params.length})`; }
+  const { rows } = await pool.query(
+    `select (f.fecha at time zone 'America/Bogota')::date as dia, f.cliente_id,
+            coalesce(t.nombre, 'Consumidor final') as cliente, t.numero_documento as documento,
+            count(*)::int as facturas,
+            string_agg(f.consecutivo, ', ' order by f.fecha) as numeros,
+            sum(f.total) as total,
+            sum(f.total) filter (where f.forma_pago = 'contado') as contado,
+            sum(f.total) filter (where f.forma_pago = 'credito') as credito,
+            sum(f.saldo) as saldo
+     from factura_venta f left join tercero t on t.id = f.cliente_id
+     where f.estado <> 'anulada' and not coalesce(f.venta_interna, false)
+       and (f.fecha at time zone 'America/Bogota')::date between $1 and $2 ${w}
+     group by 1, 2, 3, 4 order by 1, total desc`, params
+  );
+  const filas = rows.map((r) => ({
+    dia: r.dia, cliente_id: r.cliente_id, cliente: r.cliente, documento: r.documento, facturas: r.facturas, numeros: r.numeros,
+    total: r2(r.total), contado: r2(r.contado), credito: r2(r.credito), saldo: r2(r.saldo),
+  }));
+  // Resumen por cliente en el periodo.
+  const porCliente = new Map();
+  for (const f of filas) {
+    const k = f.cliente_id || 'cf';
+    const c = porCliente.get(k) || { cliente: f.cliente, documento: f.documento, dias: 0, facturas: 0, total: 0, contado: 0, credito: 0, saldo: 0 };
+    c.dias++; c.facturas += f.facturas;
+    for (const x of ['total', 'contado', 'credito', 'saldo']) c[x] = r2(c[x] + f[x]);
+    porCliente.set(k, c);
+  }
+  const clientes = [...porCliente.values()].sort((a, b) => b.total - a.total);
+  const totales = { facturas: 0, total: 0, contado: 0, credito: 0, saldo: 0 };
+  for (const c of clientes) { totales.facturas += c.facturas; for (const x of ['total', 'contado', 'credito', 'saldo']) totales[x] = r2(totales[x] + c[x]); }
+  res.json({ desde: params[0], hasta, filas, clientes, totales });
+});
+
 router.get('/venta-diaria', async (req, res) => {
   const { empresa_id, desde } = req.query;
   const hasta = req.query.hasta || hoy();
