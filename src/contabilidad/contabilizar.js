@@ -20,6 +20,7 @@
 import { pool } from '../db/pool.js';
 import { cuentaDisponible } from './catalogos.js';
 import { auxiliar, clasificar, nombreNivel, cuentaRetefuente } from './puc.js';
+import { CLASES as CLASES_BANCO, DIAN, terceroBanco } from '../bancos/extracto.js';
 
 const r2 = (n) => Math.round(Number(n || 0) * 100) / 100;
 // Tercero de las líneas sin NIT propio.
@@ -363,6 +364,36 @@ export async function contabilizarNomina(client, id) {
   });
 }
 
+// ------------------------------------------- movimientos del extracto bancario
+const diaTexto = (v) => (v instanceof Date
+  ? `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`
+  : String(v).slice(0, 10));
+
+// Movimientos del banco sin documento en el sistema (gastos financieros,
+// intereses, 4x1000 o una contrapartida elegida en la conciliación).
+export async function contabilizarMovimientoBancario(client, id) {
+  const { rows } = await client.query(
+    `select m.*, c.cuenta_contable, c.nombre as cuenta_nombre, c.banco from movimiento_bancario m
+     join cuenta_pago c on c.id = m.cuenta_pago_id where m.id = $1`, [id]
+  );
+  const m = rows[0];
+  if (!m || m.estado !== 'contabilizado' || !m.contrapartida) return borrar(client, 'movimiento_bancario', id);
+  const valor = Math.abs(r2(m.valor));
+  const entra = Number(m.valor) > 0;
+  const clase = CLASES_BANCO[m.clase];
+  const tercero = m.contrapartida_tercero_id ? {} : (clase?.tercero === 'dian' ? DIAN : terceroBanco(`${m.banco || ''} ${m.cuenta_nombre || ''}`));
+  await guardarAsiento(client, {
+    empresa_id: m.empresa_id, fecha: m.fecha, origen: 'movimiento_bancario', origen_id: id,
+    descripcion: `Extracto bancario: ${m.descripcion}${m.nota ? ` · ${m.nota}` : ''}`,
+    documento: `EB-${diaTexto(m.fecha).replace(/-/g, '')}${m.codigo ? `-${m.codigo}` : ''}`,
+    tercero_id: m.contrapartida_tercero_id || null, ...tercero,
+    lineas: [
+      { cuenta: m.cuenta_contable, debito: entra ? valor : 0, credito: entra ? 0 : valor, descripcion: m.descripcion },
+      { cuenta: m.contrapartida, debito: entra ? 0 : valor, credito: entra ? valor : 0, descripcion: clase?.nombre || m.nota || m.descripcion },
+    ],
+  });
+}
+
 // ------------------------------------------------------------- orquestación
 const FUNCIONES = {
   factura_venta: contabilizarVenta,
@@ -372,6 +403,7 @@ const FUNCIONES = {
   pago_proveedor: contabilizarPago,
   traslado: contabilizarTraslado,
   nomina: contabilizarNomina,
+  movimiento_bancario: contabilizarMovimientoBancario,
 };
 
 // Para llamar desde las rutas después de guardar un documento. Nunca rompe la
@@ -417,6 +449,7 @@ export async function reconstruirContabilidad() {
       pago_proveedor: 'select id from pago_proveedor order by fecha, creado_en',
       traslado: 'select id from traslado order by creado_en',
       nomina: 'select id from nomina order by fecha_pago, creado_en',
+      movimiento_bancario: "select id from movimiento_bancario where estado = 'contabilizado' order by fecha",
     };
     for (const [origen, sql] of Object.entries(fuentes)) {
       const { rows } = await client.query(sql);

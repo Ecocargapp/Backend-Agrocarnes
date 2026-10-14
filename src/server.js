@@ -23,13 +23,16 @@ import { router as informesRouter } from './routes/informes.js';
 import { router as cuentasPagoRouter } from './routes/cuentas-pago.js';
 import { router as nominaRouter } from './routes/nomina.js';
 import { router as usuariosRouter } from './routes/usuarios.js';
+import { router as bancosRouter } from './routes/bancos.js';
 
 const app = express();
 const corsOrigin = process.env.CORS_ORIGIN;
 app.use(cors({
   origin: !corsOrigin || corsOrigin === '*' ? true : corsOrigin.split(',').map((o) => o.trim()),
 }));
-app.use(express.json({ limit: '1mb' })); // el logo de Factus llega en base64 (hasta ~270 KB)
+// El logo de Factus llega en base64 (hasta ~270 KB); los extractos bancarios, hasta 15 MB.
+const json1mb = express.json({ limit: '1mb' });
+app.use((req, res, next) => (req.path.startsWith('/bancos') ? next() : json1mb(req, res, next)));
 
 app.get('/health', (_req, res) => res.json({ ok: true, servicio: 'agrocarnes-api' }));
 
@@ -53,6 +56,7 @@ app.use('/informes', requireAuth, informesRouter);
 app.use('/cuentas-pago', requireAuth, cuentasPagoRouter);
 app.use('/nomina', requireAuth, requireRole('admin'), nominaRouter);
 app.use('/usuarios', requireAuth, requireRole('admin'), usuariosRouter);
+app.use('/bancos', express.json({ limit: '15mb' }), requireAuth, requireRole('admin'), bancosRouter);
 
 app.use((err, _req, res, _next) => {
   console.error(err);

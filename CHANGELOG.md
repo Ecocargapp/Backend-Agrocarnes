@@ -10,6 +10,29 @@ entrega del día).
 
 ---
 
+## 2026.10.14.2 — Conciliación bancaria
+
+- Nuevo módulo **Bancos → Conciliación bancaria** (solo administrador): se carga
+  el extracto del banco (CSV de Bancolombia, el ZIP de la sucursal virtual o un
+  CSV genérico con Fecha/Descripción/Valor). Los movimientos repetidos al cargar
+  extractos que se cruzan no se duplican.
+- Automático: el 4x1000 (51159501), comisiones y servicios bancarios (53051501),
+  IVA de comisiones (24080201), intereses de ahorros (42100501), intereses
+  pagados (53052001) y retenciones del banco (13551501) se contabilizan solos,
+  con el banco o la DIAN como tercero.
+- Cada movimiento se cruza con los documentos ya contabilizados contra la cuenta
+  del banco (recibos de caja, ventas de contado, egresos, nómina…) por valor y
+  fecha (±5 días). Lo pendiente se resuelve en pantalla: cruzar con un
+  documento, cobrar una factura (crea el recibo), pagar una compra (crea el
+  egreso) o contabilizar contra una contrapartida (caja, ingreso por
+  identificar, anticipo, préstamo, aporte…), uno a uno o por lotes.
+- Informe: saldo en libros + pendientes del banco − pendientes de los libros =
+  saldo que debe mostrar el extracto (y diferencia si se da el saldo final).
+  Exporta a Excel. La reconstrucción de la contabilidad conserva lo
+  contabilizado desde el extracto.
+- Migración: `016_conciliacion_bancaria.sql`.
+
+
 ## 2026.10.14.1 — Nómina quincenal y facturas sin impuesto en Factus
 
 - **Nómina quincenal**: los trabajadores se pagan por quincenas por defecto
