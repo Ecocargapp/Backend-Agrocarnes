@@ -13,7 +13,7 @@
 // (mismo job de src/dian/cliente.js).
 
 import { pool } from '../db/pool.js';
-import { FactusClient, FactusError, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores } from './factus.js';
+import { FactusClient, FactusError, itemsFactus, errorDeCantidad, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores } from './factus.js';
 
 const MAX_INTENTOS = 12;
 
@@ -79,25 +79,21 @@ function clienteFactus(f, cfg) {
   };
 }
 
-function armarItems(f) {
-  return f.items.map((i) => {
-    const precio = Number(i.precio_unitario);
-    const pct = Number(i.impuesto_pct || 0);
-    const base = pct > 0 ? precio / (1 + pct / 100) : precio;
-    const unidad = i.factus_unidad_medida_code || UNIDAD_MEDIDA[(i.unidad_medida || '').toLowerCase()] || '94';
-    return {
-      code_reference: i.codigo || i.producto_id,
-      name: i.producto,
-      quantity: String(Number(i.cantidad).toFixed(2)),
-      discount_rate: '0.00',
-      price: (Math.round(base * 100) / 100).toFixed(2),
-      unit_measure_code: unidad,
-      standard_code: i.factus_estandar_code || '999',
-      // Factus exige al menos un impuesto por ítem: los productos sin impuesto
-      // (carne fresca, exenta) van con IVA 0 %.
-      taxes: [pct > 0 ? { code: codigoImpuesto(i.tipo_impuesto), rate: pct.toFixed(2) } : { code: '01', rate: '0.00' }],
-    };
-  });
+function armarItems(f, decimales = 3) {
+  const { lista, total } = itemsFactus(f.items, { decimales });
+  const items = lista.map(({ i, quantity, price, pct }) => ({
+    code_reference: i.codigo || i.producto_id,
+    name: i.producto,
+    quantity,
+    discount_rate: '0.00',
+    price,
+    unit_measure_code: i.factus_unidad_medida_code || UNIDAD_MEDIDA[(i.unidad_medida || '').toLowerCase()] || '94',
+    standard_code: i.factus_estandar_code || '999',
+    // Factus exige al menos un impuesto por ítem: los productos sin impuesto
+    // (carne fresca, exenta) van con IVA 0 %.
+    taxes: [pct > 0 ? { code: codigoImpuesto(i.tipo_impuesto), rate: pct.toFixed(2) } : { code: '01', rate: '0.00' }],
+  }));
+  return { items, total };
 }
 
 function extraerNumeroYCufe(r) {
@@ -119,7 +115,7 @@ export async function enviarFacturaADian(facturaId) {
 
   try {
     const factus = new FactusClient(cfg);
-    const totalFactura = f.items.reduce((s, i) => s + Number(i.cantidad) * Number(i.precio_unitario), 0);
+    const armado = armarItems(f);
     const body = {
       reference_code: `AGC-${f.id}`,
       document: '01',
@@ -131,15 +127,26 @@ export async function enviarFacturaADian(facturaId) {
           payment_form: f.forma_pago === 'credito' ? '2' : '1',
           payment_method_code: f.forma_pago === 'credito' ? '1' : codigoMedioPago(f.medio_pago, cfg.payment_method_code_default),
           reference_code: String(f.id),
-          amount: totalFactura.toFixed(2),
+          amount: armado.total.toFixed(2),
           due_date: f.forma_pago === 'credito' && f.fecha_vencimiento ? String(f.fecha_vencimiento).slice(0, 10) : undefined,
         },
       ],
       customer: clienteFactus(f, cfg),
-      items: armarItems(f),
+      items: armado.items,
     };
 
-    const r = await factus.post('v2/bills/validate', body);
+    let r;
+    try {
+      r = await factus.post('v2/bills/validate', body);
+    } catch (e) {
+      // Si Factus no acepta cantidades con 3 decimales, se reenvía con 2 y el
+      // precio ajustado para que el valor de cada línea sea el mismo.
+      if (!errorDeCantidad(e)) throw e;
+      const a2 = armarItems(f, 2);
+      body.items = a2.items;
+      body.payment_details[0].amount = a2.total.toFixed(2);
+      r = await factus.post('v2/bills/validate', body);
+    }
     const { number, cufe } = extraerNumeroYCufe(r);
     if (!number) throw new Error(`Factus no devolvió el número del documento: ${JSON.stringify(r).slice(0, 300)}`);
 

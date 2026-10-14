@@ -173,3 +173,28 @@ export function textoErrores(errors) {
   recorrer(errors);
   return partes.length ? partes.join(' · ').slice(0, 2000) : null;
 }
+
+// Ítems para Factus y el total que Factus va a calcular con ellos (el de
+// payment_details debe coincidir exactamente). Las cantidades van con 3
+// decimales (kg con gramos); con `decimales = 2` (si Factus no acepta 3) el
+// precio unitario se ajusta para que el valor de la línea no cambie.
+export function itemsFactus(items, { decimales = 3 } = {}) {
+  const r2 = (n) => Math.round(n * 100) / 100;
+  let total = 0;
+  const lista = items.map((i) => {
+    const cantidad = Number(i.cantidad);
+    const precio = Number(i.precio_unitario);
+    const pct = Number(i.impuesto_pct || 0);
+    const qty = Number(cantidad.toFixed(decimales));
+    const baseUnit = pct > 0 ? precio / (1 + pct / 100) : precio;
+    // Precio base que, multiplicado por la cantidad enviada, da el valor real de la línea.
+    const price = r2(decimales >= 3 ? baseUnit : (baseUnit * cantidad) / (qty || 1));
+    const sub = r2(qty * price);
+    total += sub + r2(sub * pct / 100);
+    return { i, quantity: qty.toFixed(decimales), price: price.toFixed(2), pct };
+  });
+  return { lista, total: r2(total) };
+}
+
+// ¿El 422 de Factus es por la cantidad (decimales)?
+export const errorDeCantidad = (err) => err instanceof FactusError && err.status === 422 && /quantity|cantidad/i.test(JSON.stringify(err.body || err.message || ''));

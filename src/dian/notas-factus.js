@@ -10,7 +10,7 @@
 // (por ahora "1", sin verificar contra la tabla completa de Factus) es correcto.
 
 import { pool } from '../db/pool.js';
-import { FactusClient, FactusError, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores } from './factus.js';
+import { FactusClient, FactusError, itemsFactus, errorDeCantidad, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores } from './factus.js';
 
 const MAX_INTENTOS = 12;
 const TIPO_DOCUMENTO = { CC: '13', NIT: '31', RC: '11', TI: '12', TE: '21', CE: '22', PA: '41', DE: '42', PEP: '47', EX: '43' };
@@ -72,25 +72,21 @@ function clienteFactus(n, cfg) {
   };
 }
 
-function armarItems(n) {
-  return n.items.map((i) => {
-    const precio = Number(i.precio_unitario);
-    const pct = Number(i.impuesto_pct || 0);
-    const base = pct > 0 ? precio / (1 + pct / 100) : precio;
-    const unidad = i.factus_unidad_medida_code || UNIDAD_MEDIDA[(i.unidad_medida || '').toLowerCase()] || '94';
-    return {
-      code_reference: i.codigo || i.producto_id,
-      name: i.producto,
-      quantity: String(Number(i.cantidad).toFixed(2)),
-      discount_rate: '0.00',
-      price: (Math.round(base * 100) / 100).toFixed(2),
-      unit_measure_code: unidad,
-      standard_code: i.factus_estandar_code || '999',
-      // Factus exige al menos un impuesto por ítem: los productos sin impuesto
-      // (carne fresca, exenta) van con IVA 0 %.
-      taxes: [pct > 0 ? { code: codigoImpuesto(i.tipo_impuesto), rate: pct.toFixed(2) } : { code: '01', rate: '0.00' }],
-    };
-  });
+function armarItems(n, decimales = 3) {
+  const { lista, total } = itemsFactus(n.items, { decimales });
+  const items = lista.map(({ i, quantity, price, pct }) => ({
+    code_reference: i.codigo || i.producto_id,
+    name: i.producto,
+    quantity,
+    discount_rate: '0.00',
+    price,
+    unit_measure_code: i.factus_unidad_medida_code || UNIDAD_MEDIDA[(i.unidad_medida || '').toLowerCase()] || '94',
+    standard_code: i.factus_estandar_code || '999',
+    // Factus exige al menos un impuesto por ítem: los productos sin impuesto
+    // (carne fresca, exenta) van con IVA 0 %.
+    taxes: [pct > 0 ? { code: codigoImpuesto(i.tipo_impuesto), rate: pct.toFixed(2) } : { code: '01', rate: '0.00' }],
+  }));
+  return { items, total };
 }
 
 function extraerNumeroYCufe(r) {
@@ -114,7 +110,7 @@ export async function enviarNotaCreditoADian(notaId) {
 
   try {
     const factus = new FactusClient(cfg);
-    const total = n.items.reduce((s, i) => s + Number(i.cantidad) * Number(i.precio_unitario), 0);
+    const armado = armarItems(n);
     const body = {
       reference_code: `AGC-NC-${n.id}`,
       correction_concept_code: String(n.razon),
@@ -126,14 +122,23 @@ export async function enviarNotaCreditoADian(notaId) {
           payment_form: n.forma_pago === 'credito' ? '2' : '1',
           payment_method_code: n.forma_pago === 'credito' ? '1' : (cfg.payment_method_code_default || '10'),
           reference_code: String(n.id),
-          amount: total.toFixed(2),
+          amount: armado.total.toFixed(2),
         },
       ],
       customer: clienteFactus(n, cfg),
-      items: armarItems(n),
+      items: armado.items,
     };
 
-    const r = await factus.post('v2/credit-notes/validate', body);
+    let r;
+    try {
+      r = await factus.post('v2/credit-notes/validate', body);
+    } catch (e) {
+      if (!errorDeCantidad(e)) throw e;
+      const a2 = armarItems(n, 2);
+      body.items = a2.items;
+      body.payment_details[0].amount = a2.total.toFixed(2);
+      r = await factus.post('v2/credit-notes/validate', body);
+    }
     const { number, cufe } = extraerNumeroYCufe(r);
     if (!number) throw new Error(`Factus no devolvió el número de la nota: ${JSON.stringify(r).slice(0, 300)}`);
 
