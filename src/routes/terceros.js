@@ -81,11 +81,39 @@ router.get('/', async (req, res) => {
   res.json(rows);
 });
 
+// Habilita un tercero existente con el otro rol: body { numero_documento, rol: cliente | proveedor }.
+router.post('/habilitar', async (req, res) => {
+  const doc = String(req.body?.numero_documento || '').replace(/[.\s]/g, '').replace(/-\d$/, '');
+  const rol = req.body?.rol;
+  if (!doc || !['cliente', 'proveedor'].includes(rol)) return res.status(400).json({ error: 'Escribe el NIT o la cédula' });
+  const { rows } = await pool.query(`select ${SELECT} from tercero where regexp_replace(numero_documento, '[.\\s]', '', 'g') = $1 limit 1`, [doc]);
+  const t = rows[0];
+  if (!t) return res.status(404).json({ error: `No hay ningún tercero con el documento ${doc}. Créalo con el formulario.` });
+  const tipo = t.tipo === rol || t.tipo === 'ambos' ? t.tipo : 'ambos';
+  const { rows: act } = await pool.query(`update tercero set tipo = $2 where id = $1 returning ${SELECT}`, [t.id, tipo]);
+  res.json({ ...act[0], existente: true, promovido: tipo !== t.tipo });
+});
+
 router.post('/', async (req, res) => {
   const { datos, error } = normalizarTercero(req.body || {});
   if (error) return res.status(400).json({ error });
-  const { rows: dup } = await pool.query('select nombre from tercero where numero_documento = $1 limit 1', [datos.numero_documento]);
-  if (dup[0]) return res.status(409).json({ error: `Ya existe un tercero con ese documento: ${dup[0].nombre}` });
+  if (req.body?.tambien === true || req.body?.tambien === 'true' || req.body?.tambien === 'on') datos.tipo = 'ambos';
+  // Si el NIT ya existe, no se duplica: se usa el mismo tercero y, si era solo
+  // cliente (o solo proveedor), pasa a ser cliente y proveedor ("ambos"). Los
+  // datos que le faltaban se completan con los del formulario; los que ya
+  // tenía no se tocan.
+  const { rows: dup } = await pool.query(`select ${SELECT} from tercero where regexp_replace(numero_documento, '[.\\s]', '', 'g') = $1 limit 1`, [datos.numero_documento]);
+  if (dup[0]) {
+    const t = dup[0];
+    const tipo = t.tipo === datos.tipo || t.tipo === 'ambos' ? t.tipo : 'ambos';
+    const completar = CAMPOS.filter((c) => c !== 'tipo' && (t[c] === null || t[c] === '') && datos[c] !== null && datos[c] !== undefined && datos[c] !== '');
+    const sets = ['tipo = $2', ...completar.map((c, i) => `${c} = $${i + 3}`)];
+    const { rows } = await pool.query(
+      `update tercero set ${sets.join(', ')} where id = $1 returning ${SELECT}`,
+      [t.id, tipo, ...completar.map((c) => datos[c])]
+    );
+    return res.status(200).json({ ...rows[0], existente: true, promovido: tipo !== t.tipo });
+  }
   const cols = ['nombre', ...CAMPOS];
   const { rows } = await pool.query(
     `insert into tercero (${cols.join(', ')}) values (${cols.map((_, i) => `$${i + 1}`).join(', ')}) returning ${SELECT}`,
@@ -105,5 +133,14 @@ router.put('/:id', async (req, res) => {
     `update tercero set ${cols.map((c, i) => `${c} = $${i + 2}`).join(', ')} where id = $1 returning ${SELECT}`,
     [req.params.id, ...cols.map((c) => datos[c])]
   );
+  res.json(rows[0]);
+});
+
+// Cambia solo el tipo de un tercero (cliente | proveedor | ambos).
+router.patch('/:id/tipo', async (req, res) => {
+  const tipo = req.body?.tipo;
+  if (!['cliente', 'proveedor', 'ambos'].includes(tipo)) return res.status(400).json({ error: 'tipo debe ser cliente, proveedor o ambos' });
+  const { rows } = await pool.query(`update tercero set tipo = $2 where id = $1 returning ${SELECT}`, [req.params.id, tipo]);
+  if (!rows[0]) return res.status(404).json({ error: 'Tercero no encontrado' });
   res.json(rows[0]);
 });
