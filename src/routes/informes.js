@@ -232,6 +232,74 @@ router.get('/ventas-cliente', async (req, res) => {
   res.json({ desde: params[0], hasta, filas, clientes, totales });
 });
 
+// Ventas por vendedor y comisiones. La comisión se calcula sobre la base sin
+// impuestos (IVA/INC), descontando las notas crédito del periodo. No incluye
+// facturas anuladas ni ventas internas. "Recaudado" es lo ya cobrado de esas
+// facturas, por si la comisión se paga sobre lo recaudado.
+// query: empresa_id, desde, hasta, vendedor_id
+router.get('/ventas-vendedor', async (req, res) => {
+  const { empresa_id, desde, vendedor_id } = req.query;
+  const hasta = req.query.hasta || hoy();
+  const params = [desde || hasta, hasta];
+  let w = '';
+  if (empresa_id) { params.push(empresa_id); w += ` and f.empresa_id = $${params.length}`; }
+  if (vendedor_id === 'sin') w += ' and f.vendedor_id is null';
+  else if (vendedor_id) { params.push(vendedor_id); w += ` and f.vendedor_id = $${params.length}`; }
+  const baseFactura = `(select coalesce(sum(i.cantidad * i.precio_unitario / (1 + coalesce(p.impuesto_pct, 0) / 100)), 0)
+                         from factura_venta_item i join producto p on p.id = i.producto_id where i.factura_venta_id = f.id)`;
+  const { rows: facturas } = await pool.query(
+    `select f.id, f.consecutivo, (f.fecha at time zone 'America/Bogota')::date as dia, f.forma_pago, f.total, f.saldo,
+            f.vendedor_id, coalesce(t.nombre, 'Consumidor final') as cliente, e.nombre as empresa, ${baseFactura} as base
+     from factura_venta f join empresa e on e.id = f.empresa_id left join tercero t on t.id = f.cliente_id
+     where f.estado <> 'anulada' and not coalesce(f.venta_interna, false)
+       and (f.fecha at time zone 'America/Bogota')::date between $1 and $2 ${w}
+     order by f.fecha`, params
+  );
+  // Notas crédito del periodo sobre facturas vigentes: su base se saca en la
+  // misma proporción base/total de la factura.
+  const { rows: notas } = await pool.query(
+    `select n.consecutivo, (n.fecha at time zone 'America/Bogota')::date as dia, n.total, f.vendedor_id, f.consecutivo as factura,
+            case when f.total > 0 then n.total * ${baseFactura} / f.total else 0 end as base
+     from nota_credito n join factura_venta f on f.id = n.factura_venta_id
+     where f.estado <> 'anulada' and not coalesce(f.venta_interna, false)
+       and (n.fecha at time zone 'America/Bogota')::date between $1 and $2 ${w}`, params
+  );
+  const { rows: vendedores } = await pool.query('select id, nombre, documento, comision_pct from vendedor');
+  const info = new Map(vendedores.map((v) => [v.id, v]));
+  const grupos = new Map();
+  const grupo = (id) => {
+    const k = id || 'sin';
+    if (!grupos.has(k)) {
+      const v = info.get(id);
+      grupos.set(k, {
+        vendedor_id: id || null, vendedor: v?.nombre || 'Sin vendedor', documento: v?.documento || null,
+        comision_pct: Number(v?.comision_pct || 0), facturas: 0, total: 0, base: 0, devoluciones: 0, base_neta: 0, recaudado: 0, saldo: 0, comision: 0,
+      });
+    }
+    return grupos.get(k);
+  };
+  const detalle = facturas.map((f) => {
+    const g = grupo(f.vendedor_id);
+    const d = { ...f, total: r2(f.total), saldo: r2(f.saldo), base: r2(f.base), vendedor: g.vendedor };
+    g.facturas++; g.total += d.total; g.base += d.base; g.saldo += d.saldo; g.recaudado += d.total - d.saldo;
+    return d;
+  });
+  for (const n of notas) grupo(n.vendedor_id).devoluciones += Number(n.base);
+  const filas = [...grupos.values()].map((g) => {
+    for (const k of ['total', 'base', 'devoluciones', 'recaudado', 'saldo']) g[k] = r2(g[k]);
+    g.base_neta = r2(g.base - g.devoluciones);
+    g.comision = g.vendedor_id ? r2(g.base_neta * g.comision_pct / 100) : 0;
+    return g;
+  }).sort((a, b) => (a.vendedor_id ? 0 : 1) - (b.vendedor_id ? 0 : 1) || b.base_neta - a.base_neta);
+  const totales = { facturas: 0 };
+  for (const k of ['total', 'base', 'devoluciones', 'base_neta', 'recaudado', 'saldo', 'comision']) totales[k] = r2(filas.reduce((a, g) => a + g[k], 0));
+  totales.facturas = filas.reduce((a, g) => a + g.facturas, 0);
+  res.json({
+    desde: params[0], hasta, vendedores: filas, totales, facturas: detalle,
+    notas_credito: notas.map((n) => ({ ...n, total: r2(n.total), base: r2(n.base), vendedor: grupo(n.vendedor_id).vendedor })),
+  });
+});
+
 router.get('/venta-diaria', async (req, res) => {
   const { empresa_id, desde } = req.query;
   const hasta = req.query.hasta || hoy();

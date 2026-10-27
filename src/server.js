@@ -24,6 +24,7 @@ import { router as cuentasPagoRouter } from './routes/cuentas-pago.js';
 import { router as nominaRouter } from './routes/nomina.js';
 import { router as usuariosRouter } from './routes/usuarios.js';
 import { router as bancosRouter } from './routes/bancos.js';
+import { router as vendedoresRouter } from './routes/vendedores.js';
 
 const app = express();
 const corsOrigin = process.env.CORS_ORIGIN;
@@ -48,6 +49,7 @@ app.use('/produccion', requireAuth, produccionRouter);
 app.use('/ventas', requireAuth, ventasRouter);
 app.use('/bodegas', requireAuth, bodegasRouter);
 app.use('/terceros', requireAuth, tercerosRouter);
+app.use('/vendedores', requireAuth, vendedoresRouter);
 app.use('/recetas', requireAuth, recetasRouter);
 app.use('/cartera', requireAuth, carteraRouter);
 app.use('/notas-credito', requireAuth, notasCreditoRouter);

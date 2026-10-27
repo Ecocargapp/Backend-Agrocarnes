@@ -12,7 +12,7 @@ import { enviarFacturaADian, sincronizarEstado } from '../dian/cliente.js';
 export const router = Router();
 
 // Vende al cliente final (mostrador Agrocarnes o consumo del Restaurante).
-// body: { empresa_id, cliente_id, bodega_id, items: [{producto_id, cantidad, precio_unitario}] }
+// body: { empresa_id, cliente_id, vendedor_id, bodega_id, items: [{producto_id, cantidad, precio_unitario}] }
 router.post('/', async (req, res) => {
   const { empresa_id, cliente_id, bodega_id, items, forma_pago = 'contado', dias_plazo, fecha_vencimiento, medio_pago } = req.body;
   const ventaInterna = req.body.venta_interna === true || req.body.venta_interna === 'true';
@@ -38,15 +38,23 @@ router.post('/', async (req, res) => {
     if (!empRows[0]) throw new Error('Empresa no encontrada');
     consecutivo = `${empRows[0].prefijo_factura || 'FV'}-${String(empRows[0].ultimo_consecutivo).padStart(6, '0')}`;
 
+    const vendedorId = req.body.vendedor_id || null;
+    if (vendedorId) {
+      const { rows: vend } = await client.query('select activo, empresa_id from vendedor where id = $1', [vendedorId]);
+      if (!vend[0]) throw new Error('Vendedor no encontrado');
+      if (!vend[0].activo) throw new Error('Ese vendedor está inactivo');
+      if (vend[0].empresa_id && vend[0].empresa_id !== empresa_id) throw new Error('Ese vendedor no pertenece a esta empresa');
+    }
+
     const total = items.reduce((acc, it) => acc + Number(it.cantidad) * Number(it.precio_unitario), 0);
     let vencimiento = null;
     if (forma_pago === 'credito') {
       vencimiento = fecha_vencimiento || new Date(Date.now() + (Number(dias_plazo) || 30) * 864e5).toISOString().slice(0, 10);
     }
     const { rows: facturaRows } = await client.query(
-      `insert into factura_venta (empresa_id, cliente_id, consecutivo, total, forma_pago, fecha_vencimiento, saldo, creado_por, venta_interna, estado_dian)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id`,
-      [empresa_id, cliente_id || null, consecutivo, total, forma_pago, vencimiento, total, req.usuario?.sub, ventaInterna, ventaInterna ? 'no_aplica' : 'pendiente']
+      `insert into factura_venta (empresa_id, cliente_id, consecutivo, total, forma_pago, fecha_vencimiento, saldo, creado_por, venta_interna, estado_dian, vendedor_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id`,
+      [empresa_id, cliente_id || null, consecutivo, total, forma_pago, vencimiento, total, req.usuario?.sub, ventaInterna, ventaInterna ? 'no_aplica' : 'pendiente', vendedorId]
     );
     facturaId = facturaRows[0].id;
 
@@ -119,11 +127,12 @@ router.get('/', async (req, res) => {
   if (empresa_id) { params.push(empresa_id); where = 'where f.empresa_id = $1'; }
   const { rows } = await pool.query(
     `select f.id, f.consecutivo, f.fecha, f.total, f.estado_dian, f.venta_interna, f.cufe, f.dian_mensaje, f.arco_factura_id, f.forma_pago, f.fecha_vencimiento, f.saldo, f.estado,
-            e.nombre as empresa, t.nombre as cliente,
+            e.nombre as empresa, t.nombre as cliente, v.nombre as vendedor,
             (select count(*)::int from factura_venta_item i where i.factura_venta_id = f.id) as items
      from factura_venta f
      join empresa e on e.id = f.empresa_id
      left join tercero t on t.id = f.cliente_id
+     left join vendedor v on v.id = f.vendedor_id
      ${where}
      order by f.fecha desc limit 200`,
     params
@@ -145,13 +154,14 @@ router.get('/reporte-diario', async (req, res) => {
   if (empresa_id) { params.push(empresa_id); where += ` and f.empresa_id = $${params.length}`; }
   const { rows } = await pool.query(
     `select f.id, f.fecha, f.consecutivo, f.forma_pago, f.total, f.saldo, f.estado, f.estado_dian,
-            e.nombre as empresa, coalesce(t.nombre, 'Consumidor final') as cliente,
+            e.nombre as empresa, coalesce(t.nombre, 'Consumidor final') as cliente, vd.nombre as vendedor,
             (select string_agg(distinct r.medio_pago, ', ' order by r.medio_pago)
                from recibo_caja_aplicacion a join recibo_caja r on r.id = a.recibo_caja_id
               where a.factura_venta_id = f.id) as medio_pago
      from factura_venta f
      join empresa e on e.id = f.empresa_id
      left join tercero t on t.id = f.cliente_id
+     left join vendedor vd on vd.id = f.vendedor_id
      ${where}
      order by f.fecha`,
     params
@@ -161,9 +171,10 @@ router.get('/reporte-diario', async (req, res) => {
 
 router.get('/:id', async (req, res) => {
   const { rows } = await pool.query(
-    `select f.*, e.nombre as empresa, t.nombre as cliente
+    `select f.*, e.nombre as empresa, t.nombre as cliente, v.nombre as vendedor
      from factura_venta f join empresa e on e.id = f.empresa_id
-     left join tercero t on t.id = f.cliente_id where f.id = $1`,
+     left join tercero t on t.id = f.cliente_id
+     left join vendedor v on v.id = f.vendedor_id where f.id = $1`,
     [req.params.id]
   );
   if (!rows[0]) return res.status(404).json({ error: 'Factura no encontrada' });
@@ -174,6 +185,23 @@ router.get('/:id', async (req, res) => {
     [req.params.id]
   );
   res.json({ ...rows[0], items });
+});
+
+// Cambia el vendedor de una factura (si se olvidó o se puso mal al facturar).
+// Solo afecta el informe de comisiones: no toca la DIAN ni la contabilidad.
+router.patch('/:id/vendedor', requireRole('admin'), async (req, res) => {
+  const vendedorId = req.body?.vendedor_id || null;
+  if (vendedorId) {
+    const { rows } = await pool.query(
+      `select v.activo, v.empresa_id, f.empresa_id as empresa_factura from vendedor v, factura_venta f where v.id = $1 and f.id = $2`,
+      [vendedorId, req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Vendedor o factura no encontrados' });
+    if (rows[0].empresa_id && rows[0].empresa_id !== rows[0].empresa_factura) return res.status(400).json({ error: 'Ese vendedor no pertenece a la empresa de la factura' });
+  }
+  const { rows } = await pool.query('update factura_venta set vendedor_id = $2 where id = $1 returning id, vendedor_id', [req.params.id, vendedorId]);
+  if (!rows[0]) return res.status(404).json({ error: 'Factura no encontrada' });
+  res.json(rows[0]);
 });
 
 // Reintenta el envío a la DIAN (o refresca el estado si ya está en Arco).

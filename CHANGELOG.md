@@ -10,6 +10,24 @@ entrega del día).
 
 ---
 
+## 2026.10.27.1 — Vendedores y comisiones
+
+- Nuevo maestro de **vendedores** (nombre, cédula, teléfono, empresa o todas,
+  % de comisión). Se crea desde Configuración → Vendedores o con "+ Nuevo" en
+  Ventas (solo administrador). No se borra: se desactiva y conserva su histórico.
+- **Ventas**: campo Vendedor en la factura (opcional; se recuerda el último
+  usado en cada punto de venta). Se ve en la lista, en el detalle y en el Excel
+  de venta diaria. El administrador puede cambiar el vendedor de una factura ya
+  hecha; no afecta la DIAN ni la contabilidad.
+- **Informes → Ventas por vendedor** (solo administrador): facturas, total, base
+  sin IVA/INC, notas crédito del periodo, base neta, recaudado, por cobrar y
+  comisión (base neta × % del vendedor). Excluye anuladas y ventas internas.
+  Filtro por vendedor (o "Sin vendedor"), detalle de facturas y Excel.
+- API: `GET/POST /vendedores`, `PATCH /vendedores/:id`,
+  `PATCH /ventas/:id/vendedor`, `GET /informes/ventas-vendedor`.
+- Migración: `018_vendedores.sql`.
+
+
 ## 2026.10.14.3 — Formulación y producción (hamburguesa, chorizos)
 
 - Fórmulas por tanda: "para 10 kg de producto uso estos insumos", con notas,
