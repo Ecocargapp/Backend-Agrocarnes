@@ -10,6 +10,18 @@ entrega del día).
 
 ---
 
+## 2026.10.28.1 — Factus: razón social de clientes persona jurídica
+
+- Facturas y notas crédito a clientes con NIT (persona jurídica) eran
+  rechazadas por Factus con "El campo razón social debe ser una cadena de
+  caracteres" (ej. AGC-000075 a PORTO MADERO SAS): el nombre se enviaba en
+  `names` y no en `company`. Ahora persona jurídica → `company` (razón social o
+  nombre) y persona natural → `names`.
+- El NIT se envía sin guion y con su dígito de verificación (`dv`) calculado.
+- Sin migraciones.
+
+---
+
 ## 2026.10.27.1 — Vendedores y comisiones
 
 - Nuevo maestro de **vendedores** (nombre, cédula, teléfono, empresa o todas,

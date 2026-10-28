@@ -148,6 +148,44 @@ export const CONSUMIDOR_FINAL = {
   tribute_code: 'ZZ',
 };
 
+// Dígito de verificación de un NIT (algoritmo DIAN, módulo 11).
+export function digitoVerificacion(nit) {
+  const n = String(nit || '').replace(/\D/g, '');
+  if (!n) return undefined;
+  const pesos = [3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71];
+  let suma = 0;
+  for (let i = 0; i < n.length && i < pesos.length; i++) suma += Number(n[n.length - 1 - i]) * pesos[i];
+  const r = suma % 11;
+  return String(r > 1 ? 11 - r : r);
+}
+
+// Adquiriente (customer) de Factus a partir del tercero. Persona jurídica:
+// el nombre va en "company" (razón social) y el NIT con su dígito de
+// verificación; persona natural: en "names".
+export function adquirienteFactus(d, cfg, TIPO_DOCUMENTO) {
+  if (!d.tercero_id) return cfg.cliente_default || CONSUMIDOR_FINAL;
+  const tipoDoc = (d.tipo_documento || 'CC').toUpperCase();
+  const juridica = d.tercero_tipo_persona === 'juridica' || tipoDoc === 'NIT';
+  // Un NIT guardado como "900123456-7" se envía sin el dígito (va aparte en dv).
+  let identificacion = String(d.numero_documento || '222222222').trim();
+  if (tipoDoc === 'NIT') identificacion = identificacion.split('-')[0].replace(/\D/g, '');
+  const nombre = String(d.tercero_razon_social || d.tercero_nombre || '').trim();
+  return {
+    identification_document_code: TIPO_DOCUMENTO[tipoDoc] || '13',
+    identification: identificacion,
+    dv: tipoDoc === 'NIT' ? digitoVerificacion(identificacion) : undefined,
+    ...(juridica ? { company: nombre } : { names: nombre }),
+    address: d.tercero_direccion || 'No registra',
+    email: d.tercero_email || undefined,
+    phone: d.tercero_telefono || undefined,
+    legal_organization_code: juridica ? '1' : '2',
+    trade_name: d.tercero_nombre_comercial || undefined,
+    tribute_code: d.tercero_regimen_iva === '3' ? '01' : 'ZZ',
+    country_code: 'CO',
+    municipality_code: d.tercero_ciudad_id || cfg.municipality_code_default || '05001',
+  };
+}
+
 // Código de tributo DIAN: 01 = IVA, 04 = impuesto nacional al consumo (INC).
 export function codigoImpuesto(tipo) {
   return tipo === 'INC' ? '04' : '01';

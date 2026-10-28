@@ -10,7 +10,7 @@
 // (por ahora "1", sin verificar contra la tabla completa de Factus) es correcto.
 
 import { pool } from '../db/pool.js';
-import { FactusClient, FactusError, itemsFactus, errorDeCantidad, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores } from './factus.js';
+import { FactusClient, FactusError, itemsFactus, errorDeCantidad, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores, adquirienteFactus } from './factus.js';
 
 const MAX_INTENTOS = 12;
 const TIPO_DOCUMENTO = { CC: '13', NIT: '31', RC: '11', TI: '12', TE: '21', CE: '22', PA: '41', DE: '42', PEP: '47', EX: '43' };
@@ -20,7 +20,7 @@ async function cargarNota(notaId) {
   const { rows } = await pool.query(
     `select n.*, f.consecutivo as factura_consecutivo, f.forma_pago, f.fecha_vencimiento,
             e.factus_config, e.nombre as empresa_nombre,
-            t.id as tercero_id, t.nombre as tercero_nombre, t.tipo_documento, t.numero_documento,
+            t.id as tercero_id, t.nombre as tercero_nombre, t.razon_social as tercero_razon_social, t.tipo_documento, t.numero_documento,
             t.email as tercero_email, t.telefono as tercero_telefono, t.direccion as tercero_direccion,
             t.ciudad_id as tercero_ciudad_id, t.tipo_persona as tercero_tipo_persona, t.nombre_comercial as tercero_nombre_comercial, t.regimen_iva as tercero_regimen_iva
      from nota_credito n
@@ -54,22 +54,7 @@ async function marcar(notaId, estado_dian, extra = {}) {
 }
 
 function clienteFactus(n, cfg) {
-  if (!n.tercero_id) {
-    return cfg.cliente_default || CONSUMIDOR_FINAL;
-  }
-  return {
-    identification_document_code: TIPO_DOCUMENTO[(n.tipo_documento || 'CC').toUpperCase()] || '13',
-    identification: n.numero_documento || '222222222',
-    names: n.tercero_nombre,
-    address: n.tercero_direccion || 'No registra',
-    email: n.tercero_email || undefined,
-    phone: n.tercero_telefono || undefined,
-    legal_organization_code: n.tercero_tipo_persona === 'juridica' || (n.tipo_documento || '').toUpperCase() === 'NIT' ? '1' : '2',
-    trade_name: n.tercero_nombre_comercial || undefined,
-    tribute_code: n.tercero_regimen_iva === '3' ? '01' : 'ZZ',
-    country_code: 'CO',
-    municipality_code: n.tercero_ciudad_id || cfg.municipality_code_default || '05001',
-  };
+  return adquirienteFactus(n, cfg, TIPO_DOCUMENTO);
 }
 
 function armarItems(n, decimales = 3) {

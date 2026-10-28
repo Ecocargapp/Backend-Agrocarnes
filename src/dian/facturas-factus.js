@@ -13,7 +13,7 @@
 // (mismo job de src/dian/cliente.js).
 
 import { pool } from '../db/pool.js';
-import { FactusClient, FactusError, itemsFactus, errorDeCantidad, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores } from './factus.js';
+import { FactusClient, FactusError, itemsFactus, errorDeCantidad, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores, adquirienteFactus } from './factus.js';
 
 const MAX_INTENTOS = 12;
 
@@ -31,7 +31,7 @@ const UNIDAD_MEDIDA = { kg: 'KGM', g: 'GRM', gr: 'GRM', l: 'LTR', lt: 'LTR', lit
 async function cargarFactura(facturaId) {
   const { rows } = await pool.query(
     `select f.*, e.factus_config, e.nombre as empresa_nombre,
-            t.id as tercero_id, t.nombre as tercero_nombre, t.tipo_documento, t.numero_documento,
+            t.id as tercero_id, t.nombre as tercero_nombre, t.razon_social as tercero_razon_social, t.tipo_documento, t.numero_documento,
             t.email as tercero_email, t.telefono as tercero_telefono, t.direccion as tercero_direccion,
             t.ciudad_id as tercero_ciudad_id, t.tipo_persona as tercero_tipo_persona, t.nombre_comercial as tercero_nombre_comercial, t.regimen_iva as tercero_regimen_iva,
             (select r.medio_pago from recibo_caja_aplicacion a join recibo_caja r on r.id = a.recibo_caja_id
@@ -66,22 +66,7 @@ async function marcar(facturaId, estado, extra = {}) {
 }
 
 function clienteFactus(f, cfg) {
-  if (!f.tercero_id) {
-    return cfg.cliente_default || CONSUMIDOR_FINAL;
-  }
-  return {
-    identification_document_code: TIPO_DOCUMENTO[(f.tipo_documento || 'CC').toUpperCase()] || '13',
-    identification: f.numero_documento || '222222222',
-    names: f.tercero_nombre,
-    address: f.tercero_direccion || 'No registra',
-    email: f.tercero_email || undefined,
-    phone: f.tercero_telefono || undefined,
-    legal_organization_code: f.tercero_tipo_persona === 'juridica' || (f.tipo_documento || '').toUpperCase() === 'NIT' ? '1' : '2',
-    trade_name: f.tercero_nombre_comercial || undefined,
-    tribute_code: f.tercero_regimen_iva === '3' ? '01' : 'ZZ',
-    country_code: 'CO',
-    municipality_code: f.tercero_ciudad_id || cfg.municipality_code_default || '05001',
-  };
+  return adquirienteFactus(f, cfg, TIPO_DOCUMENTO);
 }
 
 function armarItems(f, decimales = 3) {
