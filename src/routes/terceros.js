@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
+import { digitoVerificacion } from '../dian/factus.js';
 
 export const router = Router();
 
@@ -26,13 +27,34 @@ const texto = (v) => {
 };
 const booleano = (v, porDefecto) => (v === undefined || v === null || v === '' ? porDefecto : v === true || v === 'true' || v === 'on' || v === '1' || v === 1);
 
+// Valida el número de documento. El NIT va SIN dígito de verificación (la DIAN
+// y Factus lo reciben aparte): se rechaza "902033593-9" y también el NIT de
+// empresa escrito con el DV pegado ("9020335939").
+const NUMERICOS = new Set(['CC', 'NIT', 'TI', 'RC', 'CE', 'TE']);
+export function validarDocumento(tipo, numero) {
+  if (tipo === 'NIT') {
+    if (/-/.test(numero)) return `Escribe el NIT sin el dígito de verificación: ${numero.split('-')[0]} (el sistema calcula el DV solo)`;
+    if (!/^\d+$/.test(numero)) return 'El NIT solo lleva números, sin puntos ni letras';
+    if (numero.length < 6 || numero.length > 10) return `El NIT ${numero} no es válido: debe tener entre 6 y 10 dígitos, sin el dígito de verificación`;
+    if (numero.length === 10 && /^[89]/.test(numero) && digitoVerificacion(numero.slice(0, 9)) === numero[9]) {
+      return `Parece que el NIT incluye el dígito de verificación al final. Escríbelo sin él: ${numero.slice(0, 9)}`;
+    }
+    return null;
+  }
+  if (NUMERICOS.has(tipo)) {
+    if (!/^\d+$/.test(numero)) return 'El número de documento solo lleva números, sin puntos ni guiones';
+    if (numero.length < 5 || numero.length > 12) return `El documento ${numero} no es válido: debe tener entre 5 y 12 dígitos`;
+  }
+  return null;
+}
+
 // Normaliza y valida con las reglas de la plantilla. Devuelve { datos } o { error }.
 export function normalizarTercero(b) {
   const d = {};
   d.tipo = ['cliente', 'proveedor', 'ambos'].includes(b.tipo) ? b.tipo : null;
   d.tipo_persona = b.tipo_persona === 'juridica' ? 'juridica' : 'natural';
   d.tipo_documento = texto(b.tipo_documento)?.toUpperCase() || (d.tipo_persona === 'juridica' ? 'NIT' : 'CC');
-  d.numero_documento = texto(b.numero_documento)?.replace(/[.\s]/g, '').replace(/-\d$/, '') || null; // sin DV
+  d.numero_documento = texto(b.numero_documento)?.replace(/[.,\s]/g, '') || null; // sin DV
   for (const c of ['primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido', 'razon_social', 'nombre_comercial',
     'direccion', 'ciudad_id', 'telefono', 'email', 'cuenta_bancaria', 'cod_banco', 'id_exterior']) d[c] = texto(b[c]);
   d.autorretenedor_renta = d.tipo_persona === 'juridica' && booleano(b.autorretenedor_renta, false);
@@ -48,6 +70,8 @@ export function normalizarTercero(b) {
   if (!d.tipo) return { error: 'tipo debe ser cliente, proveedor o ambos' };
   if (!TIPOS_DOCUMENTO[d.tipo_documento]) return { error: `Tipo de documento no válido: ${d.tipo_documento}` };
   if (!d.numero_documento) return { error: 'Falta el número de identificación (sin dígito de verificación)' };
+  const errDoc = validarDocumento(d.tipo_documento, d.numero_documento);
+  if (errDoc) return { error: errDoc };
   if (d.tipo_persona === 'natural') {
     if (!d.primer_nombre || !d.primer_apellido) return { error: 'Persona natural: primer nombre y primer apellido son obligatorios' };
     d.razon_social = null;
@@ -128,6 +152,15 @@ router.put('/:id', async (req, res) => {
   if (!act[0]) return res.status(404).json({ error: 'Tercero no encontrado' });
   const { datos, error } = normalizarTercero({ ...act[0], ...req.body });
   if (error) return res.status(400).json({ error });
+  if (req.body?.tambien !== undefined) {
+    const tambien = req.body.tambien === true || req.body.tambien === 'true';
+    if (tambien) datos.tipo = 'ambos';
+    else if (act[0].tipo === 'ambos' && ['cliente', 'proveedor'].includes(req.body.rol)) datos.tipo = req.body.rol;
+  }
+  const { rows: dup } = await pool.query(
+    `select nombre from tercero where regexp_replace(numero_documento, '[.\\s]', '', 'g') = $1 and id <> $2 limit 1`, [datos.numero_documento, req.params.id]
+  );
+  if (dup[0]) return res.status(400).json({ error: `Ya existe otro tercero con el documento ${datos.numero_documento}: ${dup[0].nombre}` });
   const cols = ['nombre', ...CAMPOS];
   const { rows } = await pool.query(
     `update tercero set ${cols.map((c, i) => `${c} = $${i + 2}`).join(', ')} where id = $1 returning ${SELECT}`,

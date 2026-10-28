@@ -10,6 +10,22 @@ entrega del día).
 
 ---
 
+## 2026.10.28.2 — Edición de terceros y validación del NIT
+
+- Nueva pantalla **Terceros** (clientes y proveedores): búsqueda por nombre o
+  documento y edición de todos los datos con el mismo formulario de creación.
+  Muestra el NIT con su DV y marca "Revisar" los documentos inválidos.
+- Validación del documento al crear y al editar: el NIT va **sin dígito de
+  verificación** (se rechaza "900123456-7" y el NIT de empresa con el DV pegado
+  al final), solo números y entre 6 y 10 dígitos; cédulas y similares, entre 5 y
+  12 dígitos. El formulario muestra el DV calculado mientras se escribe.
+- Al editar no se permite poner un documento que ya tiene otro tercero.
+- Origen: el cliente PORTO MADERO SAS quedó con NIT "1" y la DIAN rechazó la
+  factura AGC-000075 (FAK21: ID de adquiriente no informado).
+- Sin migraciones.
+
+---
+
 ## 2026.10.28.1 — Factus: razón social de clientes persona jurídica
 
 - Facturas y notas crédito a clientes con NIT (persona jurídica) eran
