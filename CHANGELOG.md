@@ -20,6 +20,9 @@ entrega del día).
   contra cálculo decimal exacto en 2.145 combinaciones de cantidad y precio.
 - Si el reenvío con 2 decimales también falla, el mensaje guarda además el error
   del primer intento (3 decimales) para saber por qué se usó el respaldo.
+- Corrección (mismo día): el cambio dejó el manejo de error en el lugar
+  equivocado y al reintentar salía "e is not defined" (AGC-000069). Corregido y
+  probado simulando Factus: envío normal, respaldo con 2 decimales y fallo total.
 - Sin migraciones.
 
 ---

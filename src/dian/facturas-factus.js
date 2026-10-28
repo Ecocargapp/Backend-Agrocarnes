@@ -134,13 +134,7 @@ export async function enviarFacturaADian(facturaId) {
 
     let r;
     try {
-      try {
-        r = await enviarConReintento(factus, 'v2/bills/validate', body, rutaBorrar);
-      } catch (e2) {
-        // Se deja también el error del primer intento (3 decimales) para el diagnóstico.
-        e2.message = `${e2.message} · Primer intento (3 decimales): ${e.message}`.slice(0, 2000);
-        throw e2;
-      }
+      r = await enviarConReintento(factus, 'v2/bills/validate', body, rutaBorrar);
     } catch (e) {
       // Si Factus no acepta cantidades con 3 decimales, se reenvía con 2 y el
       // precio ajustado para que el valor de cada línea sea el mismo.
@@ -148,7 +142,13 @@ export async function enviarFacturaADian(facturaId) {
       const a2 = armarItems(f, 2);
       body.items = a2.items;
       body.payment_details[0].amount = a2.total.toFixed(2);
-      r = await enviarConReintento(factus, 'v2/bills/validate', body, rutaBorrar);
+      try {
+        r = await enviarConReintento(factus, 'v2/bills/validate', body, rutaBorrar);
+      } catch (e2) {
+        // Se deja también el error del primer intento (3 decimales) para el diagnóstico.
+        e2.message = `${e2.message} · Primer intento (3 decimales): ${e.message}`.slice(0, 2000);
+        throw e2;
+      }
     }
     const { number, cufe } = extraerNumeroYCufe(r);
     if (!number) throw new Error(`Factus no devolvió el número del documento: ${JSON.stringify(r).slice(0, 300)}`);

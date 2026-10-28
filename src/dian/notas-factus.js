@@ -123,6 +123,14 @@ export async function enviarNotaCreditoADian(notaId) {
 
     let r;
     try {
+      r = await enviarConReintento(factus, 'v2/credit-notes/validate', body, rutaBorrar);
+    } catch (e) {
+      // Si Factus no acepta cantidades con 3 decimales, se reenvía con 2 y el
+      // precio ajustado para que el valor de cada línea sea el mismo.
+      if (!errorDeCantidad(e)) throw e;
+      const a2 = armarItems(n, 2);
+      body.items = a2.items;
+      body.payment_details[0].amount = a2.total.toFixed(2);
       try {
         r = await enviarConReintento(factus, 'v2/credit-notes/validate', body, rutaBorrar);
       } catch (e2) {
@@ -130,12 +138,6 @@ export async function enviarNotaCreditoADian(notaId) {
         e2.message = `${e2.message} · Primer intento (3 decimales): ${e.message}`.slice(0, 2000);
         throw e2;
       }
-    } catch (e) {
-      if (!errorDeCantidad(e)) throw e;
-      const a2 = armarItems(n, 2);
-      body.items = a2.items;
-      body.payment_details[0].amount = a2.total.toFixed(2);
-      r = await enviarConReintento(factus, 'v2/credit-notes/validate', body, rutaBorrar);
     }
     const { number, cufe } = extraerNumeroYCufe(r);
     if (!number) throw new Error(`Factus no devolvió el número de la nota: ${JSON.stringify(r).slice(0, 300)}`);
