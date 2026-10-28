@@ -123,7 +123,13 @@ export async function enviarNotaCreditoADian(notaId) {
 
     let r;
     try {
-      r = await enviarConReintento(factus, 'v2/credit-notes/validate', body, rutaBorrar);
+      try {
+        r = await enviarConReintento(factus, 'v2/credit-notes/validate', body, rutaBorrar);
+      } catch (e2) {
+        // Se deja también el error del primer intento (3 decimales) para el diagnóstico.
+        e2.message = `${e2.message} · Primer intento (3 decimales): ${e.message}`.slice(0, 2000);
+        throw e2;
+      }
     } catch (e) {
       if (!errorDeCantidad(e)) throw e;
       const a2 = armarItems(n, 2);

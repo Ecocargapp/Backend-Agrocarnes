@@ -244,7 +244,9 @@ export function textoErrores(errors) {
 // decimales (kg con gramos); con `decimales = 2` (si Factus no acepta 3) el
 // precio unitario se ajusta para que el valor de la línea no cambie.
 export function itemsFactus(items, { decimales = 3 } = {}) {
-  const r2 = (n) => Math.round(n * 100) / 100;
+  // Redondeo a centavos sin el ruido de coma flotante (1,70 × 17.847,35 da
+  // 30340.494999… en JS y debe dar 30.340,50, como lo calcula Factus).
+  const r2 = (n) => Math.round(Number((n * 100).toPrecision(15))) / 100;
   let total = 0;
   const lista = items.map((i) => {
     const cantidad = Number(i.cantidad);

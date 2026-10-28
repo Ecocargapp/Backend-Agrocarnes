@@ -134,7 +134,13 @@ export async function enviarFacturaADian(facturaId) {
 
     let r;
     try {
-      r = await enviarConReintento(factus, 'v2/bills/validate', body, rutaBorrar);
+      try {
+        r = await enviarConReintento(factus, 'v2/bills/validate', body, rutaBorrar);
+      } catch (e2) {
+        // Se deja también el error del primer intento (3 decimales) para el diagnóstico.
+        e2.message = `${e2.message} · Primer intento (3 decimales): ${e.message}`.slice(0, 2000);
+        throw e2;
+      }
     } catch (e) {
       // Si Factus no acepta cantidades con 3 decimales, se reenvía con 2 y el
       // precio ajustado para que el valor de cada línea sea el mismo.

@@ -10,6 +10,20 @@ entrega del día).
 
 ---
 
+## 2026.10.28.4 — Factus: centavo de diferencia en el total del pago
+
+- AGC-000069 fue rechazada con "La suma de todos los detalles de pago no es
+  igual al total de la factura. Esperado: 50,590.50 - Enviado: 50,590.49". En el
+  envío con cantidades a 2 decimales, 1,70 × 17.847,35 da 30340.494999… en
+  JavaScript y se redondeaba a 30.340,49, mientras Factus calcula 30.340,50.
+- El redondeo a centavos ahora elimina el ruido de coma flotante; verificado
+  contra cálculo decimal exacto en 2.145 combinaciones de cantidad y precio.
+- Si el reenvío con 2 decimales también falla, el mensaje guarda además el error
+  del primer intento (3 decimales) para saber por qué se usó el respaldo.
+- Sin migraciones.
+
+---
+
 ## 2026.10.28.3 — Factus: reintento de documentos rechazados
 
 - Al reintentar una factura o nota crédito que ya había fallado, Factus
