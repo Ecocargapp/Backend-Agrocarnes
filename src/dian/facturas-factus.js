@@ -13,7 +13,7 @@
 // (mismo job de src/dian/cliente.js).
 
 import { pool } from '../db/pool.js';
-import { FactusClient, FactusError, itemsFactus, errorDeCantidad, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores, adquirienteFactus } from './factus.js';
+import { FactusClient, FactusError, itemsFactus, errorDeCantidad, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores, adquirienteFactus, descartarNoValidado, enviarConReintento } from './factus.js';
 
 const MAX_INTENTOS = 12;
 
@@ -125,9 +125,16 @@ export async function enviarFacturaADian(facturaId) {
       items: armado.items,
     };
 
+    // Reintento de un documento que ya falló: se borra la versión que Factus
+    // tiene guardada para que tome los datos corregidos (cliente, ítems…).
+    const rutaBorrar = `v2/bills/destroy/reference/AGC-${f.id}`;
+    if (Number(f.dian_intentos || 0) > 0 || ['rechazada', 'error'].includes(f.estado_dian)) {
+      await descartarNoValidado(factus, rutaBorrar);
+    }
+
     let r;
     try {
-      r = await factus.post('v2/bills/validate', body);
+      r = await enviarConReintento(factus, 'v2/bills/validate', body, rutaBorrar);
     } catch (e) {
       // Si Factus no acepta cantidades con 3 decimales, se reenvía con 2 y el
       // precio ajustado para que el valor de cada línea sea el mismo.
@@ -135,7 +142,7 @@ export async function enviarFacturaADian(facturaId) {
       const a2 = armarItems(f, 2);
       body.items = a2.items;
       body.payment_details[0].amount = a2.total.toFixed(2);
-      r = await factus.post('v2/bills/validate', body);
+      r = await enviarConReintento(factus, 'v2/bills/validate', body, rutaBorrar);
     }
     const { number, cufe } = extraerNumeroYCufe(r);
     if (!number) throw new Error(`Factus no devolvió el número del documento: ${JSON.stringify(r).slice(0, 300)}`);

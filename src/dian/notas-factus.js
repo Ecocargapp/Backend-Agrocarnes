@@ -10,7 +10,7 @@
 // (por ahora "1", sin verificar contra la tabla completa de Factus) es correcto.
 
 import { pool } from '../db/pool.js';
-import { FactusClient, FactusError, itemsFactus, errorDeCantidad, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores, adquirienteFactus } from './factus.js';
+import { FactusClient, FactusError, itemsFactus, errorDeCantidad, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores, adquirienteFactus, descartarNoValidado, enviarConReintento } from './factus.js';
 
 const MAX_INTENTOS = 12;
 const TIPO_DOCUMENTO = { CC: '13', NIT: '31', RC: '11', TI: '12', TE: '21', CE: '22', PA: '41', DE: '42', PEP: '47', EX: '43' };
@@ -114,15 +114,22 @@ export async function enviarNotaCreditoADian(notaId) {
       items: armado.items,
     };
 
+    // Reintento de un documento que ya falló: se borra la versión que Factus
+    // tiene guardada para que tome los datos corregidos (cliente, ítems…).
+    const rutaBorrar = `v2/credit-notes/reference/AGC-NC-${n.id}`;
+    if (Number(n.dian_intentos || 0) > 0 || ['rechazada', 'error'].includes(n.estado_dian)) {
+      await descartarNoValidado(factus, rutaBorrar);
+    }
+
     let r;
     try {
-      r = await factus.post('v2/credit-notes/validate', body);
+      r = await enviarConReintento(factus, 'v2/credit-notes/validate', body, rutaBorrar);
     } catch (e) {
       if (!errorDeCantidad(e)) throw e;
       const a2 = armarItems(n, 2);
       body.items = a2.items;
       body.payment_details[0].amount = a2.total.toFixed(2);
-      r = await factus.post('v2/credit-notes/validate', body);
+      r = await enviarConReintento(factus, 'v2/credit-notes/validate', body, rutaBorrar);
     }
     const { number, cufe } = extraerNumeroYCufe(r);
     if (!number) throw new Error(`Factus no devolvió el número de la nota: ${JSON.stringify(r).slice(0, 300)}`);

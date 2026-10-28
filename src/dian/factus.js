@@ -148,6 +148,33 @@ export const CONSUMIDOR_FINAL = {
   tribute_code: 'ZZ',
 };
 
+// Factus guarda cada documento por su reference_code y, si se vuelve a enviar
+// el mismo código, responde con el documento que ya tenía (con los datos
+// viejos). Una factura o nota rechazada por la DIAN se corrige borrándola en
+// Factus (solo se puede si no está validada) y creándola de nuevo. Si no existe
+// o ya fue validada, el borrado falla y se ignora: el envío devuelve la vigente.
+export async function descartarNoValidado(factus, ruta) {
+  try {
+    await factus.delete(ruta);
+    return true;
+  } catch (err) {
+    if (err?.status !== 404) console.warn(`[factus] no se pudo borrar ${ruta}: ${err.message}`);
+    return false;
+  }
+}
+
+// Envía a Factus; si responde 409 (documento pendiente por enviar a la DIAN con
+// ese mismo reference_code), lo borra y reintenta una vez.
+export async function enviarConReintento(factus, endpoint, body, rutaBorrar) {
+  try {
+    return await factus.post(endpoint, body);
+  } catch (err) {
+    if (err?.status !== 409) throw err;
+    await descartarNoValidado(factus, rutaBorrar);
+    return factus.post(endpoint, body);
+  }
+}
+
 // Dígito de verificación de un NIT (algoritmo DIAN, módulo 11).
 export function digitoVerificacion(nit) {
   const n = String(nit || '').replace(/\D/g, '');

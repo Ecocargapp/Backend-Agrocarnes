@@ -10,6 +10,22 @@ entrega del día).
 
 ---
 
+## 2026.10.28.3 — Factus: reintento de documentos rechazados
+
+- Al reintentar una factura o nota crédito que ya había fallado, Factus
+  respondía con el documento que tenía guardado con el mismo reference_code (con
+  los datos viejos), así que corregir el cliente no servía: AGC-000075 seguía
+  saliendo con FAK21 después de corregir el NIT.
+- Ahora, antes de reenviar un documento rechazado o con error, se borra en
+  Factus la versión no validada (`DELETE v2/bills/destroy/reference/…` y
+  `DELETE v2/credit-notes/reference/…`) y se crea de nuevo con los datos
+  actuales. Si Factus responde 409 (documento pendiente), también se borra y se
+  reintenta una vez. Un documento ya validado por la DIAN no se puede borrar y
+  se conserva.
+- Sin migraciones.
+
+---
+
 ## 2026.10.28.2 — Edición de terceros y validación del NIT
 
 - Nueva pantalla **Terceros** (clientes y proveedores): búsqueda por nombre o
