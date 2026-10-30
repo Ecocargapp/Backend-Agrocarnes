@@ -147,7 +147,7 @@ router.get('/', async (req, res) => {
 // query: empresa_id, desde, hasta (YYYY-MM-DD, por defecto hoy)
 router.get('/reporte-diario', async (req, res) => {
   const { empresa_id } = req.query;
-  const desde = req.query.desde || new Date().toISOString().slice(0, 10);
+  const desde = req.query.desde || new Date(Date.now() - 5 * 3600e3).toISOString().slice(0, 10); // hoy en Colombia
   const hasta = req.query.hasta || desde;
   const params = [desde, hasta];
   let where = 'where f.fecha::date between $1 and $2';
