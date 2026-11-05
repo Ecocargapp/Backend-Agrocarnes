@@ -19,6 +19,7 @@ import { pool } from '../db/pool.js';
 import { registrarMovimiento } from '../db/inventario.js';
 import { contabilizar } from '../contabilidad/contabilizar.js';
 import { enviarNotaCreditoADian, sincronizarNotaCredito } from '../dian/notas.js';
+import { descargarPdfNota } from '../dian/notas-factus.js';
 
 export const router = Router();
 
@@ -176,4 +177,20 @@ router.post('/:id/dian', async (req, res) => {
 router.post('/:id/dian/estado', async (req, res) => {
   try { res.json(await sincronizarNotaCredito(req.params.id)); }
   catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// PDF de la nota crédito electrónica (representación gráfica) para imprimir.
+router.get('/:id/pdf', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `select e.proveedor_dian from nota_credito n join empresa e on e.id = n.empresa_id where n.id = $1`, [req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Nota crédito no encontrada' });
+    if (rows[0].proveedor_dian !== 'factus') return res.status(400).json({ error: 'El PDF solo está disponible para notas emitidas con Factus' });
+    const { nombre, buffer } = await descargarPdfNota(req.params.id);
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${nombre.replace(/"/g, '')}"` });
+    res.send(buffer);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });

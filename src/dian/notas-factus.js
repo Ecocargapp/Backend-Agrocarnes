@@ -169,3 +169,17 @@ export async function sincronizarNotaCredito(notaId) {
     return { estado: 'enviada', mensaje: err.message };
   }
 }
+
+// Descarga de Factus la representación gráfica (PDF) de una nota crédito ya
+// validada (GET v2/credit-notes/:number/download-pdf). Devuelve { nombre, buffer }.
+export async function descargarPdfNota(notaId) {
+  const n = await cargarNota(notaId);
+  if (!n.factus_config?.client_id) throw new Error(`${n.empresa_nombre} no tiene cuenta de Factus`);
+  if (!n.cufe || !n.consecutivo) throw new Error('La nota crédito todavía no ha sido aceptada por la DIAN; no hay PDF');
+  const factus = new FactusClient(n.factus_config);
+  const r = await factus.get(`v2/credit-notes/${encodeURIComponent(n.consecutivo)}/download-pdf`);
+  const d = r?.data || {};
+  const b64 = d.pdf_base_64_encoded || d.pdf_base64 || d.file;
+  if (!b64) throw new Error('Factus no devolvió el PDF de la nota');
+  return { nombre: `${d.file_name || n.consecutivo}.pdf`.replace(/\.pdf\.pdf$/, '.pdf'), buffer: Buffer.from(b64, 'base64') };
+}
