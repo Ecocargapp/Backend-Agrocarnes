@@ -13,6 +13,33 @@ import { pool } from '../db/pool.js';
 import { FactusClient, FactusError, itemsFactus, errorDeCantidad, CONSUMIDOR_FINAL, codigoImpuesto, codigoMedioPago, textoErrores, adquirienteFactus, descartarNoValidado, enviarConReintento } from './factus.js';
 
 const MAX_INTENTOS = 12;
+
+// Fecha 'AAAA-MM-DD'. Una columna DATE llega como Date a medianoche en la zona
+// del servidor; un timestamptz (fecha de la nota) se pasa a hora de Colombia.
+const ymdDate = (v) => (v instanceof Date
+  ? `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`
+  : String(v).slice(0, 10));
+const ymdBogota = (v) => new Date(new Date(v).getTime() - 5 * 3600e3).toISOString().slice(0, 10);
+
+// Rango de numeración de notas crédito: el configurado en la empresa o, si no
+// hay, el rango activo de "Nota Crédito" que tenga la cuenta de Factus (y se
+// guarda para las siguientes). Si Factus no tiene ninguno, el error lo dice
+// claro en vez del genérico "id rango de numeración es obligatorio".
+async function rangoNotaCredito(factus, cfg, empresaId) {
+  if (cfg.numbering_range_id_nota_credito) return Number(cfg.numbering_range_id_nota_credito);
+  const r = await factus.get('v2/numbering-ranges');
+  const lista = r?.data?.data || r?.data || [];
+  const nc = lista.filter((x) => x.is_active !== false && /cr[eé]dit/i.test(String(x.document || '')));
+  if (!nc.length) {
+    throw new Error('La cuenta de Factus no tiene un rango de numeración para notas crédito. Créalo en Factus (Rangos de numeración → Nota crédito) y vuelve a intentar.');
+  }
+  const id = Number(nc[0].id);
+  await pool.query(
+    `update empresa set factus_config = jsonb_set(factus_config, '{numbering_range_id_nota_credito}', to_jsonb($2::int)) where id = $1`,
+    [empresaId, id]
+  );
+  return id;
+}
 const TIPO_DOCUMENTO = { CC: '13', NIT: '31', RC: '11', TI: '12', TE: '21', CE: '22', PA: '41', DE: '42', PEP: '47', EX: '43' };
 const UNIDAD_MEDIDA = { kg: 'KGM', g: 'GRM', gr: 'GRM', l: 'LTR', lt: 'LTR', litro: 'LTR', lb: 'LBR', un: '94', unidad: '94' };
 
@@ -75,8 +102,10 @@ function armarItems(n, decimales = 3) {
 }
 
 function extraerNumeroYCufe(r) {
+  // Según la versión, Factus devuelve la nota en data.credit_note.*, data.bill.* o data.*.
   const data = r?.data || {};
-  return { number: data.number, cufe: data.cufe };
+  const doc = data.credit_note || data.bill || data;
+  return { number: doc.number || data.number, cufe: doc.cufe || doc.cude || data.cufe || data.cude };
 }
 
 export async function enviarNotaCreditoADian(notaId) {
@@ -99,7 +128,7 @@ export async function enviarNotaCreditoADian(notaId) {
     const body = {
       reference_code: `AGC-NC-${n.id}`,
       correction_concept_code: String(n.razon),
-      numbering_range_id: cfg.numbering_range_id_nota_credito || undefined,
+      numbering_range_id: await rangoNotaCredito(factus, cfg, n.empresa_id),
       bill_number: n.factura_consecutivo,
       observation: `${n.notas || ''} — ${n.consecutivo || ''}`.trim(),
       payment_details: [
@@ -108,6 +137,9 @@ export async function enviarNotaCreditoADian(notaId) {
           payment_method_code: n.forma_pago === 'credito' ? '1' : (cfg.payment_method_code_default || '10'),
           reference_code: String(n.id),
           amount: armado.total.toFixed(2),
+          // Factus exige due_date cuando la forma de pago es crédito (2): se usa
+          // el vencimiento de la factura original, o la fecha de la nota.
+          due_date: n.forma_pago === 'credito' ? (n.fecha_vencimiento ? ymdDate(n.fecha_vencimiento) : ymdBogota(n.fecha)) : undefined,
         },
       ],
       customer: clienteFactus(n, cfg),

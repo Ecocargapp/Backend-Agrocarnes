@@ -10,6 +10,23 @@ entrega del día).
 
 ---
 
+## 2026.11.05.1 — Notas crédito con Factus: rango, vencimiento y PDF
+
+- Todas las notas crédito enviadas a Factus estaban rechazadas (NC-AGC-000003,
+  -000004 y -000005): faltaban `numbering_range_id` y, en facturas a crédito,
+  `payment_details.due_date`.
+- La cuenta de Factus solo tiene rangos de facturas (AFE id 2928 Agrocarnes, RFE
+  id 2929 Restaurante); no hay rango de notas crédito. Ahora, si la empresa no
+  tiene `numbering_range_id_nota_credito`, se toma el rango activo de "Nota
+  Crédito" de Factus y se guarda; si no existe, el mensaje lo dice claro.
+- `due_date` = vencimiento de la factura original (o la fecha de la nota).
+- La respuesta de Factus se lee en `data.credit_note`, `data.bill` o `data`.
+- Descarga del PDF de la nota (`GET v2/credit-notes/:number/download-pdf`) y
+  detalle de la nota en la pantalla con el mensaje de la DIAN y reintento.
+- Probado simulando Factus (con y sin rango de notas). Sin migraciones.
+
+---
+
 ## 2026.10.28.4 — Factus: centavo de diferencia en el total del pago
 
 - AGC-000069 fue rechazada con "La suma de todos los detalles de pago no es
