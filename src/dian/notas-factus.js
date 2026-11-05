@@ -102,10 +102,12 @@ function armarItems(n, decimales = 3) {
 }
 
 function extraerNumeroYCufe(r) {
-  // Según la versión, Factus devuelve la nota en data.credit_note.*, data.bill.* o data.*.
+  // Factus devuelve la nota en data.* (number = "NC1", cude = su código único)
+  // o envuelta en data.credit_note.*. OJO: data.bill es la FACTURA referenciada
+  // (AFE69 y su CUFE), nunca se debe tomar de ahí.
   const data = r?.data || {};
-  const doc = data.credit_note || data.bill || data;
-  return { number: doc.number || data.number, cufe: doc.cufe || doc.cude || data.cufe || data.cude };
+  const doc = data.credit_note || data;
+  return { number: doc.number, cufe: doc.cude || doc.cufe };
 }
 
 export async function enviarNotaCreditoADian(notaId) {

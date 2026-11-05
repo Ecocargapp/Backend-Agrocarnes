@@ -10,6 +10,17 @@ entrega del día).
 
 ---
 
+## 2026.11.05.2 — Notas crédito: número y CUDE correctos
+
+- Se creó en Factus el rango de notas crédito NC (id 3399, documento 22).
+- La primera nota aceptada (NC1, PORTO MADERO) quedó guardada con el número y
+  el CUFE de la factura referenciada (AFE69): la respuesta de Factus trae la
+  nota en `data.*` (`number`, `cude`) y la factura en `data.bill`, y se leía
+  `data.bill` primero. Por eso el PDF daba 404. Ahora se toma `data.number` y
+  `data.cude`. Script `scripts/reparar-nota-factus.js` para corregir la NC1.
+
+---
+
 ## 2026.11.05.1 — Notas crédito con Factus: rango, vencimiento y PDF
 
 - Todas las notas crédito enviadas a Factus estaban rechazadas (NC-AGC-000003,
