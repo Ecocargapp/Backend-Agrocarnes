@@ -100,7 +100,9 @@ export class FactusClient {
     try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
     if (!res.ok) {
       const detalle = typeof data === 'object' ? JSON.stringify(data) : String(data);
-      throw new FactusError(`Factus ${method} ${endpoint} → ${res.status}: ${detalle.slice(0, 600)}`, { status: res.status, body: data, endpoint });
+      // 402: el plan de Factus no permite más documentos (agotado o vencido). No es un error de la factura.
+      const prefijo = res.status === 402 ? 'PLAN DE FACTUS AGOTADO O VENCIDO: hay que renovar o cambiar el plan en Factus para seguir emitiendo. ' : '';
+      throw new FactusError(`${prefijo}Factus ${method} ${endpoint} → ${res.status}: ${detalle.slice(0, 600)}`, { status: res.status, body: data, endpoint });
     }
     return data;
   }
