@@ -141,7 +141,7 @@ export async function enviarNotaCreditoADian(notaId) {
           amount: armado.total.toFixed(2),
           // Factus exige due_date cuando la forma de pago es crédito (2): se usa
           // el vencimiento de la factura original, o la fecha de la nota.
-          due_date: n.forma_pago === 'credito' ? (n.fecha_vencimiento ? ymdDate(n.fecha_vencimiento) : ymdBogota(n.fecha)) : undefined,
+          due_date: n.forma_pago === 'credito' ? [n.fecha_vencimiento ? ymdDate(n.fecha_vencimiento) : ymdBogota(n.fecha), ymdBogota(Date.now())].sort().pop() : undefined,
         },
       ],
       customer: clienteFactus(n, cfg),

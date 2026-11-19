@@ -22,6 +22,11 @@ const ymd = (v) => (v instanceof Date
   ? `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`
   : String(v).slice(0, 10));
 
+// Factus emite con la fecha de hoy; un vencimiento anterior (factura vieja que
+// se reintenta) haría que la DIAN la rechace, así que se envía hoy como mínimo.
+const hoyBogota = () => new Date(Date.now() - 5 * 3600e3).toISOString().slice(0, 10);
+const vencimientoValido = (v) => { const d = ymd(v); const h = hoyBogota(); return d < h ? h : d; };
+
 // Mismos códigos DIAN que usa Arco (identification_document_code de Factus).
 const TIPO_DOCUMENTO = { CC: '13', NIT: '31', RC: '11', TI: '12', TE: '21', CE: '22', PA: '41', DE: '42', PEP: '47', EX: '43' };
 
@@ -118,7 +123,7 @@ export async function enviarFacturaADian(facturaId) {
           payment_method_code: f.forma_pago === 'credito' ? '1' : codigoMedioPago(f.medio_pago, cfg.payment_method_code_default),
           reference_code: String(f.id),
           amount: armado.total.toFixed(2),
-          due_date: f.forma_pago === 'credito' && f.fecha_vencimiento ? ymd(f.fecha_vencimiento) : undefined,
+          due_date: f.forma_pago === 'credito' && f.fecha_vencimiento ? vencimientoValido(f.fecha_vencimiento) : undefined,
         },
       ],
       customer: clienteFactus(f, cfg),
