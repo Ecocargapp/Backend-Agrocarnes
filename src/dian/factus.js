@@ -243,6 +243,30 @@ export function textoErrores(errors) {
 // payment_details debe coincidir exactamente). Las cantidades van con 3
 // decimales (kg con gramos); con `decimales = 2` (si Factus no acepta 3) el
 // precio unitario se ajusta para que el valor de la línea no cambie.
+// Si cantidad × precio cae exactamente en medio centavo (ej. 6,50 × 17.913,77 =
+// 116.439,505), Factus lo redondea distinto a nosotros (coma flotante) y la
+// suma del pago no cuadra por $0,01. Se mueve el precio al centavo más cercano
+// con el que la línea NO queda en ,xx5 (cambia la línea en menos de $0,10).
+function evitarMedioCentavo(qty, price, decimales) {
+  if (!qty) return price;
+  const escala = 10 ** decimales;
+  const Q = BigInt(Math.round(qty * escala)); // cantidad en unidades de 10^-decimales
+  const enMedio = (p) => {
+    const P = BigInt(Math.round(p * 100)); // precio en centavos
+    const prod = Q * P; // valor de la línea en unidades de 10^-(decimales+2)
+    const unidadCentavo = BigInt(escala); // 1 centavo = 10^decimales unidades
+    return (prod % unidadCentavo) * 2n === unidadCentavo; // resto exacto de medio centavo
+  };
+  if (!enMedio(price)) return price;
+  // El candidato más cercano al valor de la línea que se quería enviar.
+  const objetivo = qty * price;
+  const candidatos = [1, -1, 2, -2, 3, -3]
+    .map((d) => Math.round(price * 100 + d) / 100)
+    .filter((p) => p > 0 && !enMedio(p))
+    .sort((a, b) => Math.abs(qty * a - objetivo) - Math.abs(qty * b - objetivo));
+  return candidatos[0] ?? price;
+}
+
 export function itemsFactus(items, { decimales = 3 } = {}) {
   // Redondeo a centavos sin el ruido de coma flotante (1,70 × 17.847,35 da
   // 30340.494999… en JS y debe dar 30.340,50, como lo calcula Factus).
@@ -252,10 +276,12 @@ export function itemsFactus(items, { decimales = 3 } = {}) {
     const cantidad = Number(i.cantidad);
     const precio = Number(i.precio_unitario);
     const pct = Number(i.impuesto_pct || 0);
-    const qty = Number(cantidad.toFixed(decimales));
+    // Mínimo una unidad del último decimal (ej. 0,001 kg con 2 decimales no puede ir en 0,00).
+    const qty = Math.max(Number(cantidad.toFixed(decimales)), cantidad > 0 ? 1 / 10 ** decimales : 0);
     const baseUnit = pct > 0 ? precio / (1 + pct / 100) : precio;
     // Precio base que, multiplicado por la cantidad enviada, da el valor real de la línea.
-    const price = r2(decimales >= 3 ? baseUnit : (baseUnit * cantidad) / (qty || 1));
+    let price = r2(decimales >= 3 ? baseUnit : (baseUnit * cantidad) / (qty || 1));
+    price = evitarMedioCentavo(qty, price, decimales);
     const sub = r2(qty * price);
     total += sub + r2(sub * pct / 100);
     return { i, quantity: qty.toFixed(decimales), price: price.toFixed(2), pct };
