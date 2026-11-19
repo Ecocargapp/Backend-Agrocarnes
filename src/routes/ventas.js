@@ -21,6 +21,14 @@ router.post('/', async (req, res) => {
   }
   if (!['contado', 'credito'].includes(forma_pago)) return res.status(400).json({ error: 'forma_pago debe ser contado o credito' });
   if (forma_pago === 'credito' && !cliente_id) return res.status(400).json({ error: 'Una venta a crédito necesita un cliente identificado' });
+  // Cantidad y precio > 0 en cada línea: la DIAN rechaza líneas en $0 (Factus
+  // exige price >= 0,01), y una factura en cero tampoco cuadra cartera ni costos.
+  for (const [i, it] of items.entries()) {
+    const cant = Number(it.cantidad);
+    const precio = Number(it.precio_unitario);
+    if (!Number.isFinite(cant) || cant <= 0) return res.status(400).json({ error: `Línea ${i + 1}: la cantidad debe ser mayor que 0` });
+    if (!Number.isFinite(precio) || precio <= 0) return res.status(400).json({ error: `Línea ${i + 1}: el precio debe ser mayor que $0. Si es un obsequio, regístralo como gasto o ajuste de inventario, no como venta.` });
+  }
 
   const client = await pool.connect();
   let facturaId;
