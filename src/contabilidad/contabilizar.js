@@ -14,6 +14,8 @@
 //   Pago proveedor Dr 2205/2335                Cr 1105/1110
 //   Traslado entre empresas (mismo NIT): origen Dr 2895 Cr 1435 · destino Dr 1435 Cr 2895
 //   Depreciación   Dr 5160                     Cr 1592 (mensual, línea recta)
+//   Ajuste inv.    sobrante: Dr 1435 Cr 42509501 · faltante: Dr 61359502 merma / 53959502 pérdida /
+//                  51959501 consumo interno / 53959503 diferencia de conteo, Cr 1435
 //   Nómina         Dr 5105xx devengados        Cr 2370/2380 aportes, 236505 retención, 1105/1110 neto pagado
 //                  Dr 5105xx aportes empleador Cr 2370/2380 (salud, pensión, ARL, caja, SENA, ICBF)
 
@@ -292,6 +294,40 @@ export async function contabilizarTraslado(client, id) {
   });
 }
 
+// ------------------------------------------------------- ajustes de inventario
+const CUENTA_FALTANTE = { merma: '61359502', perdida: '53959502', consumo: '51959501', conteo: '53959503' };
+const NOMBRE_MOTIVO = { merma: 'Merma', perdida: 'Pérdida', consumo: 'Consumo interno/obsequio', conteo: 'Diferencia de conteo' };
+export async function contabilizarAjuste(client, id) {
+  const { rows } = await client.query('select * from ajuste_inventario where id = $1', [id]);
+  const a = rows[0];
+  if (!a) return;
+  if (a.estado === 'anulado') return borrar(client, 'ajuste_inventario', id);
+  const { rows: items } = await client.query(
+    `select i.*, p.nombre as producto from ajuste_inventario_item i join producto p on p.id = i.producto_id
+     where i.ajuste_id = $1 and i.diferencia <> 0`, [id]
+  );
+  const lineas = [];
+  for (const it of items) {
+    const valor = r2(Math.abs(Number(it.diferencia)) * Number(it.costo_unitario));
+    if (!(valor > 0)) continue;
+    if (Number(it.diferencia) > 0) {
+      lineas.push({ cuenta: '1435', debito: valor, descripcion: `Sobrante ${it.producto}` });
+      lineas.push({ cuenta: '42509501', credito: valor, descripcion: `Sobrante ${it.producto}` });
+    } else {
+      const cuenta = CUENTA_FALTANTE[it.motivo] || CUENTA_FALTANTE.conteo;
+      const desc = `${NOMBRE_MOTIVO[it.motivo] || 'Faltante'} ${it.producto}`;
+      lineas.push({ cuenta, debito: valor, descripcion: desc });
+      lineas.push({ cuenta: '1435', credito: valor, descripcion: desc });
+    }
+  }
+  if (!lineas.length) return borrar(client, 'ajuste_inventario', id);
+  await guardarAsiento(client, {
+    empresa_id: a.empresa_id, fecha: a.fecha, origen: 'ajuste_inventario', origen_id: id,
+    descripcion: `Ajuste de inventario AJ-${String(a.numero).padStart(4, '0')}${a.observacion ? ` · ${a.observacion}` : ''}`,
+    documento: `AJ-${String(a.numero).padStart(4, '0')}`, ...EMPRESA_PROPIA, lineas,
+  });
+}
+
 // --------------------------------------------------------------- depreciación
 // Línea recta mensual desde el mes siguiente a la compra, hasta el mes de `hasta`.
 // Idempotente: solo crea los meses que falten. El último mes ajusta el redondeo.
@@ -402,6 +438,7 @@ const FUNCIONES = {
   recibo_caja: contabilizarRecibo,
   pago_proveedor: contabilizarPago,
   traslado: contabilizarTraslado,
+  ajuste_inventario: contabilizarAjuste,
   nomina: contabilizarNomina,
   movimiento_bancario: contabilizarMovimientoBancario,
 };
@@ -448,6 +485,7 @@ export async function reconstruirContabilidad() {
       recibo_caja: 'select id from recibo_caja order by fecha, creado_en',
       pago_proveedor: 'select id from pago_proveedor order by fecha, creado_en',
       traslado: 'select id from traslado order by creado_en',
+      ajuste_inventario: 'select id from ajuste_inventario order by fecha, creado_en',
       nomina: 'select id from nomina order by fecha_pago, creado_en',
       movimiento_bancario: "select id from movimiento_bancario where estado = 'contabilizado' order by fecha",
     };

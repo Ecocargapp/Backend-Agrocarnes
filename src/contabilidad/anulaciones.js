@@ -257,3 +257,19 @@ export async function anularProduccion(id, motivo, usuario) {
   });
   return { ok: true, documento: 'Orden de producción' };
 }
+
+// ---------------------------------------------------- ajustes de inventario
+export async function anularAjuste(id, motivo, usuario) {
+  motivo = exigirMotivo(motivo);
+  await transaccion(async (client) => {
+    const { rows } = await client.query('select * from ajuste_inventario where id = $1 for update', [id]);
+    const a = rows[0];
+    if (!a) throw new Error('Ajuste no encontrado');
+    if (a.estado === 'anulado') throw new Error('El ajuste ya está anulado');
+    await reversarInventario(client, 'ajuste_inventario', id, usuario);
+    await client.query(`update ajuste_inventario set estado = 'anulado', anulado_en = now(), anulado_por = $2, motivo_anulacion = $3 where id = $1`, [id, usuario, motivo]);
+    await bitacora(client, { documento: 'ajuste_inventario', documento_id: id, empresa_id: a.empresa_id, motivo, usuario, descripcion: `Ajuste de inventario AJ-${String(a.numero).padStart(4, '0')}` });
+  });
+  await contabilizar('ajuste_inventario', id);
+  return { ok: true, documento: 'Ajuste de inventario' };
+}

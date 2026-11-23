@@ -10,6 +10,25 @@ entrega del día).
 
 ---
 
+## 2026.11.23.1 — Ajuste de inventario (cuadre / toma física)
+
+- Nuevo módulo **Ajuste inv.** (solo administrador): se escoge la bodega, se
+  cargan sus productos y se escribe la cantidad **contada**. El sistema calcula
+  la diferencia contra la existencia del momento y deja la existencia en lo
+  contado. Consecutivo AJ-0001, AJ-0002… sin huecos.
+- Faltantes salen al costo promedio y se contabilizan según el motivo de la
+  línea: merma → 61359502 (costo de ventas), pérdida (daño, vencido, hurto) →
+  53959502, consumo interno u obsequio → 51959501, diferencia de conteo →
+  53959503; contra 1435. Sobrantes entran al costo promedio (o al último costo
+  conocido, o al que se escriba si el producto no tiene costo): Dr 1435 Cr
+  42509501.
+- Kardex: movimientos "Ajuste: sobrante" / "Ajuste: faltante". Detalle del
+  ajuste con Excel. Anulación con doble confirmación (reversa inventario y
+  asiento). Incluido en "Reconstruir contabilidad".
+- Migración: `019_ajustes_inventario.sql`.
+
+---
+
 ## 2026.11.05.2 — Notas crédito: número y CUDE correctos
 
 - Se creó en Factus el rango de notas crédito NC (id 3399, documento 22).
