@@ -88,7 +88,11 @@ router.post('/', requireRole('admin'), async (req, res) => {
       'update empresa set ultimo_nota_credito = ultimo_nota_credito + 1 where id = $1 returning prefijo_factura, ultimo_nota_credito', [f.empresa_id]
     );
     const consecutivo = `NC-${emp[0].prefijo_factura || 'FV'}-${String(emp[0].ultimo_nota_credito).padStart(6, '0')}`;
-    const bodegaDestino = bodega_id || itemsFactura[0]?.bodega_id;
+    // Solo se reingresa lo que la venta sacó del inventario, a la bodega de donde
+    // salió (o a la indicada). Una línea sin salida registrada (producto que no
+    // manejaba inventario al facturar, p. ej.) va en la nota pero no mueve inventario.
+    const bodegaDestino = bodega_id || itemsFactura.find((x) => x.bodega_id)?.bodega_id || null;
+    let lineasReingresadas = 0;
 
     const { rows: nc } = await client.query(
       `insert into nota_credito (empresa_id, factura_venta_id, consecutivo, razon, reingresa_inventario, bodega_id, total, notas, estado_dian, creado_por)
@@ -103,15 +107,21 @@ router.post('/', requireRole('admin'), async (req, res) => {
         'insert into nota_credito_item (nota_credito_id, producto_id, cantidad, precio_unitario) values ($1, $2, $3, $4)',
         [notaId, it.producto_id, it.cantidad, it.precio_unitario]
       );
-      if (reingresa_inventario) {
-        const orig = itemsFactura.find((x) => x.producto_id === it.producto_id);
+      const orig = itemsFactura.find((x) => x.producto_id === it.producto_id);
+      if (reingresa_inventario && orig?.bodega_id) {
+        lineasReingresadas++;
         await registrarMovimiento(client, {
           tipo: anulacion ? 'anulacion_venta' : 'devolucion_venta',
-          producto_id: it.producto_id, bodega_id: bodegaDestino, cantidad: it.cantidad,
+          producto_id: it.producto_id, bodega_id: bodega_id || orig.bodega_id, cantidad: it.cantidad,
           costo_unitario: orig?.costo_unitario ?? 0,
           referencia_tipo: 'nota_credito', referencia_id: notaId, creado_por: req.usuario?.sub,
         });
       }
+    }
+
+    if (reingresa_inventario && !lineasReingresadas) {
+      // Nada de la factura había salido del inventario: la nota queda sin reingreso.
+      await client.query('update nota_credito set reingresa_inventario = false, bodega_id = null where id = $1', [notaId]);
     }
 
     // Cartera: la nota reduce lo que el cliente debe. Si ya había pagado, queda a favor (se informa).
